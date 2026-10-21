@@ -274,9 +274,13 @@ off the list when it has been.
   table and the state transitions are unit-tested, and the service is correctly absent on both
   benches, so the write path has never run against a real HAL. Needs a car that has the service.
 - The BYD windshield HUD over the SOME/IP gateway (SPEC 10.9). The road-info frame is a byte-exact
-  unit-tested protobuf, and the bind/start/fire/keepalive transport is in place. The gateway is
-  present on both benches, but no frame has been fired at a real windshield renderer, so the render
-  (and the field-7/8 bytes-vs-repeated-int question per car) is unverified. Needs a car with the glass.
+  unit-tested protobuf, now pinned at parity with a known-good BYD HUD sender (same field order,
+  clear frame and field-28 table, `SomeIpHudParityTest`). No frame has been fired at a real
+  windshield renderer, so the render is unverified. Known per-car results, neither a frame defect:
+  a DiLink 5.0 cluster draws the arrow and distance but not the road text (the glass does not render
+  field 10); a Leopard 7's windshield arrow is a CAN instrument signal, not a SOME/IP frame, and
+  that path needs privileged or ADB access the app does not use, so it stays out of scope. Needs a
+  car whose glass takes the SOME/IP frame to confirm the render.
 - The BYD steering-wheel voice button repeating the current direction (SPEC 10.9). The key router
   is unit-tested; no wheel press has reached the filter. Needs a car, and the accessibility
   service enabled, with a drive on. `adb shell input keyevent` does not exercise the filter.

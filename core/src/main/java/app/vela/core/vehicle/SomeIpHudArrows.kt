@@ -9,7 +9,13 @@ import app.vela.core.model.ManeuverType
  * Left, right, the slight turns and straight are the same in both. These ids belong to the SOME/IP
  * HUD only; the FCE cluster has its own ([FceIcons]).
  *
- * Vela has no SOME/IP sender yet. The table is here so one can be added without guessing ids.
+ * [SomeIpHudFrame] sends the native-arrow table, which matches the proven windshield sender's
+ * field-28 values 1 to 1 (left 1, right 2, slight 3/5, sharp folded 1/2, straight 11, U-turn 7,
+ * everything glyph-less 99). The one documented gap: the proven sender splits a U-turn into 7 for
+ * right-hand traffic and 8 for left-hand traffic, while Vela sends 7 because its maneuver model
+ * carries no U-turn side. That is correct for right-hand-traffic markets and would draw a
+ * right-hand U-turn glyph in a left-hand-traffic one. Fixing it needs a side signal in the core
+ * [Maneuver] model, which is out of scope here.
  */
 object SomeIpHudArrows {
     enum class Table {

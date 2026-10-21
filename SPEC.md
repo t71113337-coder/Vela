@@ -5906,6 +5906,20 @@ blank frame to clear, and stop on teardown. Every transaction runs on one backgr
 a wedged gateway can block a transact and must never reach the main thread. Off unless the head unit
 has the gateway and the user turned it on.
 
+The frame is byte-for-byte at parity with a known-good BYD HUD sender: the same field order
+(2, 6, 7, 8, 9, 10, 16, 26, 28 wrapped as outer field 1), the same clear frame, and the same
+field-28 arrow table, pinned by `SomeIpHudParityTest`. Two field results across cars are not frame
+defects and are not fixable here. On a car whose windshield arrow is a CAN instrument signal rather
+than a SOME/IP frame (a Leopard 7 was observed dark on the glass with another app's SOME/IP output
+too), the arrow comes from the CAN guidance path, which needs privileged or ADB access the app does
+not have; Vela sends no CAN signal and that path stays out of scope, not faked. On a DiLink 5.0
+cluster that draws the arrow and distance but not the road text, the glass does not render field 10
+(another SOME/IP sender gets the same result there), so there is nothing to change in the frame. The
+one place Vela carries more than the proven sender is the ETA in field 26, which that sender also
+sends; it is pinned by a test and should be confirmed on a drive. U-turns send id 7 (right-hand
+traffic); the proven sender splits 7 and 8 by driving side, which Vela's maneuver model cannot yet
+express.
+
 #### The steering-wheel voice key
 
 `SteeringWheelService` (`:app`, an accessibility key filter), `WheelKeys` and `WheelKeyRouter`
