@@ -14,6 +14,23 @@ import app.vela.core.model.Maneuver
  * the maneuver id, wrapped as outer field 1. The maneuver id uses [SomeIpHudArrows]; the FCE
  * cluster glyphs ([FceIcons]) are a different vocabulary and are never used here.
  */
+/**
+ * Whether the windshield HUD should be showing guidance right now, as opposed to a clear frame
+ * (SPEC 10.9). It guides only while the feature is on and the drive is actively navigating with a
+ * maneuver to show; a stop, an arrival, a pause or a reroute with no maneuver yet all fall through
+ * to not-guiding, which the controller turns into a single clear so the glass never keeps a stale
+ * arrow. Pure, so the dispatch and the stale-clear transitions are tested without a device. The FCE
+ * cluster has the same shape ([clusterNavOutput]); it keeps the view open on a pause where the glass
+ * clears it.
+ */
+fun someIpHudGuiding(
+    enabled: Boolean,
+    navigating: Boolean,
+    paused: Boolean,
+    arrived: Boolean,
+    hasManeuver: Boolean,
+): Boolean = enabled && navigating && !paused && !arrived && hasManeuver
+
 object SomeIpHudFrame {
     /** startSomeIpService argument: service 0x010A, instance 0x0001. */
     const val SERVICE_ID = 0x000B010A00010000L
@@ -22,7 +39,9 @@ object SomeIpHudFrame {
 
     /** A guiding frame: status 2, the arrow picture in field 8, distance, road and ETA. [png] is
      *  the maneuver arrow as PNG bytes (empty when none); distance is floored at 11 m because 0..10
-     *  shows a "now" glyph on some clusters; the road name is capped at 200 chars. */
+     *  shows a "now" glyph on some clusters; the road name is capped at 200 UTF-8 bytes, cut on a
+     *  character boundary, which matches the proven sender's byte cap (a char cap overruns it for
+     *  multi-byte scripts). */
     fun guidance(f28: Int, distanceMeters: Int, road: String, etaHhMm: String, png: ByteArray?, counter: Int = 2): ByteArray {
         val inner = ArrayList<Byte>(256)
         putVarintField(inner, 2, counter.toLong())        // Counter
@@ -30,7 +49,7 @@ object SomeIpHudFrame {
         putLenField(inner, 7, ByteArray(0))               // PermissibleDirection (lane picture): empty
         putLenField(inner, 8, png ?: ByteArray(0))        // RecommendedDrivingDirections picture (the arrow PNG)
         putVarintField(inner, 9, distanceMeters.coerceAtLeast(DIST_FLOOR_M).toLong())
-        putLenField(inner, 10, road.take(ROAD_MAX).toByteArray(Charsets.UTF_8))
+        putLenField(inner, 10, roadBytes(road))
         putVarintField(inner, 16, 2)                      // NavigatingStatus: guiding
         putLenField(inner, 26, etaHhMm.toByteArray(Charsets.UTF_8)) // ETAInfoTime "HH:mm"
         putVarintField(inner, 28, f28.toLong())           // RecommendedDrivingDirectionsId
@@ -51,7 +70,17 @@ object SomeIpHudFrame {
     fun maneuverId(m: Maneuver?): Int = SomeIpHudArrows.of(m, SomeIpHudArrows.Table.NATIVE_ARROW)
 
     const val DIST_FLOOR_M = 11
-    const val ROAD_MAX = 200
+    const val ROAD_MAX_BYTES = 200
+
+    // Encode the road and cap it at ROAD_MAX_BYTES, backing off any split multi-byte character, so
+    // an Arabic or CJK name is truncated like the proven sender (a byte cap, not a char cap).
+    private fun roadBytes(road: String): ByteArray {
+        val utf8 = road.toByteArray(Charsets.UTF_8)
+        if (utf8.size <= ROAD_MAX_BYTES) return utf8
+        var cut = ROAD_MAX_BYTES
+        while (cut > 0 && (utf8[cut].toInt() and 0xC0) == 0x80) cut--  // 0x80..0xBF = UTF-8 continuation byte
+        return utf8.copyOf(cut)
+    }
 
     // The inner message rides as outer field 1 (length-delimited): 0x0A, varint(len), bytes.
     private fun wrap(inner: List<Byte>): ByteArray {

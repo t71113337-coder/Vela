@@ -9,17 +9,33 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * The FCE cluster path's own evidence, separate from the SOME/IP windshield frame. It pins the
+ * property ids, status codes, glyph table, distance rounding and the order of writes against the
+ * documented FCE cluster property contract (SPEC 10.9), the independent oracle. A drift in an id, a
+ * status value, a glyph, the rounding or the write order fails a test here.
+ *
+ * Not covered here, because it needs the Android framework `Parcel` these JVM tests do not provide:
+ * the Binder transaction contract in `:app` `FceCarPropertyTransport` (setProperty transaction 5,
+ * descriptor "com.fce.misc.proxy.hardware.property.ICarProperty", the CarPropertyValue parcel order
+ * non-null marker, id, area 0, status 0, timestamp 0, class name, value). Those are confirmed by
+ * source against the oracle, not by this test, and are stated as such in the report and SPEC.
+ */
 class FceClusterTest {
     private fun m(type: ManeuverType, exit: Int? = null, clockwise: Boolean? = null) = Maneuver(
         type, "", LatLng(38.5449, -121.7405), 0.0, 0.0,
         roundabout = clockwise?.let { RoundaboutGeometry(90.0, it) }, roundaboutExit = exit,
     )
 
-    @Test fun `property ids are the HAL's`() {
+    @Test fun `property ids and status codes match the proven FCE sender`() {
         assertEquals(0x214000a5, FceProperties.NAVI_STATUS)
         assertEquals(0x21400099, FceProperties.ICON)
         assertEquals(0x2140009a, FceProperties.ICON_SET_2)
         assertEquals(0x21400098, FceProperties.DISTANCE)
+        assertEquals(2, FceProperties.STATUS_NAVIGATING)
+        assertEquals(1, FceProperties.STATUS_CRUISE)
+        assertEquals(0, FceProperties.STATUS_CLOSED)
+        assertEquals(131_071, FceProperties.MAX_DISTANCE_M)
     }
 
     @Test fun `every maneuver type has a glyph or none`() {

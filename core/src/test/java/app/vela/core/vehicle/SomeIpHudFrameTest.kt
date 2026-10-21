@@ -87,6 +87,18 @@ class SomeIpHudFrameTest {
         assert(contains(listOf(0xE0, 0x01))) // field 28 tag
     }
 
+    @Test fun `guides only while on, navigating, not paused, not arrived, with a maneuver`() {
+        // The one guiding case.
+        assertEquals(true, someIpHudGuiding(enabled = true, navigating = true, paused = false, arrived = false, hasManeuver = true))
+        // Each condition alone drops it to a clear, which is how a stop, a reroute, a pause and the
+        // off switch all blank the glass.
+        assertEquals(false, someIpHudGuiding(enabled = false, navigating = true, paused = false, arrived = false, hasManeuver = true))
+        assertEquals(false, someIpHudGuiding(enabled = true, navigating = false, paused = false, arrived = false, hasManeuver = true)) // stopped
+        assertEquals(false, someIpHudGuiding(enabled = true, navigating = true, paused = true, arrived = false, hasManeuver = true))   // paused
+        assertEquals(false, someIpHudGuiding(enabled = true, navigating = true, paused = false, arrived = true, hasManeuver = true))   // arrived
+        assertEquals(false, someIpHudGuiding(enabled = true, navigating = true, paused = false, arrived = false, hasManeuver = false)) // reroute, no maneuver yet
+    }
+
     @Test fun `maneuver id uses the native-arrow table`() {
         val left = Maneuver(ManeuverType.TURN_LEFT, "", LatLng(38.5449, -121.7405), 0.0, 0.0)
         val uturn = Maneuver(ManeuverType.UTURN, "", LatLng(38.5449, -121.7405), 0.0, 0.0)

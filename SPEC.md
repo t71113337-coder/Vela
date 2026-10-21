@@ -5819,8 +5819,9 @@ Three optional integrations for a BYD head unit (DiLink), all off by default, ea
 none needed for ordinary navigation. The Android adapters are in `:app` `vehicle/`, the pure
 mappings and policies in `:core` `vehicle/`. Each probes for its own prerequisite and reports a
 `VehicleSupport` state; the absence of all three changes nothing on a phone, on GrapheneOS or on
-another car. None has been checked on a vehicle. What is written here is what the code does, and
-what each piece has been seen to do on a bench.
+another car. Only the cluster map has been confirmed on a vehicle (a Leopard 8); the two HUD
+transports and the wheel key are proven by unit tests and clean bench launches, not yet by a car.
+What is written here is what the code does, with each claim's evidence stated where it is made.
 
 #### The cluster map
 
@@ -5874,9 +5875,10 @@ sequence (blank, cruise, closed) runs on stop. The glyph table is the cluster's 
 traffic: straight 16, slight right 17, slight left 18, right 20, left 19, sharp left 21, sharp
 right 22, U-turn left 23, U-turn right 24, roundabout exits 1 to 10 the consecutive codes 42 to 51
 else enter 53, destination 3, none 0. The distance is rounded to 10 m under 1 km and 100 m above,
-because the cluster formats kilometers itself. The service is absent on benches .165 and .39; the
-properties' meaning is from one vehicle's observed behavior, so the feature is opt-in and reported
-as confirmed on one car only.
+because the cluster formats kilometers itself. The service is absent on benches .165 and .39, so
+Vela's write path has not run against a real HAL. The property meanings are from one vehicle's
+observed behavior, so the feature is opt-in; what is confirmed on that one car is the property
+meanings, not a HUD Vela drove on the cluster.
 
 The SOME/IP windshield HUD: `SomeIpHudFrame` and `SomeIpHudArrows` (`:core`), `SomeIpHudTransport`
 and `SomeIpHud` (`:app`). A BYD head unit's windshield glass reads a road-info frame published over
@@ -5884,9 +5886,10 @@ the gateway `com.ts.car.someip.service`, an exported, permission-free Binder ser
 and fires the frame: no ADB, no permission. The frame is the proven minimal one, an inner
 HudRoadInfoNotifyStruct wrapped as outer field 1, with field 2 counter, field 6 layout (1 guiding,
 255 clear), field 7 empty lane picture, field 8 the maneuver arrow as a transparent PNG (Vela's own
-glyph), field 9 distance floored at 11 m, field 10 the road (<= 200 chars), field 16 NavigatingStatus
-(2 guiding, 1 idle), field 26 the ETA "HH:mm", and field 28 the maneuver id. `SomeIpHudFrame` is a
-small protobuf writer so the bytes are byte-exact and unit-tested.
+glyph), field 9 distance floored at 11 m, field 10 the road (<= 200 UTF-8 bytes, cut on a character
+boundary, so a multi-byte name truncates like the reference and not by character count), field 16
+NavigatingStatus (2 guiding, 1 idle), field 26 the ETA "HH:mm", and field 28 the maneuver id.
+`SomeIpHudFrame` is a small protobuf writer so the bytes are byte-exact and unit-tested.
 
 The maneuver id reads two vocabularies: the BYD map app's (left 1, right 2, slight 3 and 5, sharp 7
 and 8, U-turn 9 and 10, straight 11, roundabout enter 13 or 14 clockwise, exit 24 or 23, destination
@@ -5906,19 +5909,50 @@ blank frame to clear, and stop on teardown. Every transaction runs on one backgr
 a wedged gateway can block a transact and must never reach the main thread. Off unless the head unit
 has the gateway and the user turned it on.
 
-The frame is byte-for-byte at parity with a known-good BYD HUD sender: the same field order
-(2, 6, 7, 8, 9, 10, 16, 26, 28 wrapped as outer field 1), the same clear frame, and the same
-field-28 arrow table, pinned by `SomeIpHudParityTest`. Two field results across cars are not frame
-defects and are not fixable here. On a car whose windshield arrow is a CAN instrument signal rather
-than a SOME/IP frame (a Leopard 7 was observed dark on the glass with another app's SOME/IP output
-too), the arrow comes from the CAN guidance path, which needs privileged or ADB access the app does
-not have; Vela sends no CAN signal and that path stays out of scope, not faked. On a DiLink 5.0
-cluster that draws the arrow and distance but not the road text, the glass does not render field 10
-(another SOME/IP sender gets the same result there), so there is nothing to change in the frame. The
-one place Vela carries more than the proven sender is the ETA in field 26, which that sender also
-sends; it is pinned by a test and should be confirmed on a drive. U-turns send id 7 (right-hand
-traffic); the proven sender splits 7 and 8 by driving side, which Vela's maneuver model cannot yet
-express.
+`SomeIpHudFrame` is a deterministic writer. `SomeIpHudParityTest` hand-encodes the wire bytes the
+documented HUD contract specifies, independently, and asserts the whole frame equals them for a
+representative guidance frame and the boundary cases: the outer wrap, every field's number, wire
+type and value in order, the distance floor at 11 m, the road truncation at 200 UTF-8 bytes on a
+character boundary, and the clear frame. A wrong wire type, value, encoding or field order fails it.
+This is serialized-byte parity with the contract over the tested vectors, not only field order; it
+is not a comparison against another app's running serializer, and it does not claim every possible
+payload. Field 28 is the native-arrow table, pinned separately, and shares no code with the FCE
+glyphs.
+
+The runtime decision (`someIpHudGuiding`, `:core`) is a pure function and is unit-tested: it guides
+only while the feature is on and the drive is navigating, not paused, not arrived, with a maneuver;
+a stop, an arrival, a pause or a reroute with no maneuver yet falls through to one clear frame, so
+the glass never holds a stale arrow. Not yet proven on a car: a real glass has not rendered a Vela
+frame, and the field-7/8 bytes-versus-repeated-int reading is the renderer's per-car parse, not the
+sender's concern. The keepalive is 1 s, inside the roughly 2 s the glass holds a frame; the
+reference re-sends at 300 ms, and the slower cadence is the proven choice on the other BYD apps on
+this path.
+
+Two field results seen across cars are not frame defects. A Leopard 7 was dark on the glass with a
+SOME/IP sender; its windshield arrow is a CAN instrument signal (GUIDE_INFO_SIMPLE), not a SOME/IP
+frame, and that path needs privileged or ADB access the app does not have, so it stays unsupported
+and is not faked (see the reachability table). A DiLink 5.0 cluster drew the arrow and distance but
+not the road text: that glass does not render field 10 (another SOME/IP sender gets the same result
+there), so the frame, which carries the road in field 10 like the reference, is correct and the
+limit is car-side. The ETA in field 26 is sent by the reference too; it is pinned by a test and not
+yet confirmed on a drive. U-turns send id 7 (right-hand traffic); the reference splits 7 and 8 by
+driving side, which Vela's maneuver model carries no field to express.
+
+#### No-ADB reachability of each cluster and HUD transport
+
+What each BYD navigation output needs, and whether Vela (no ADB, no root, no platform signature)
+can reach it. This is why Vela ships two of the four and marks the rest unsupported.
+
+| Transport | Contract | Reachable without ADB | Evidence |
+| --- | --- | --- | --- |
+| Cluster map (Presentation) | Public `Presentation` on a container-owned cluster display, matched by name | Yes | Vehicle-verified on a Leopard 8; the WMS admits the window and the map renders |
+| FCE cluster HUD | `setProperty` txn 5 on `ICarProperty`, caller not checked | Yes, where the service exists | Service absent on benches .165 and .39; property meanings seen on one car; builder and write order unit-tested; write path not run on a car |
+| SOME/IP windshield HUD | Fire a frame on the exported, permission-free `com.ts.car.someip.service` gateway | Yes, where the gateway exists | Byte-exact frame unit-tested; fired on a bench with the gateway; no real glass render seen |
+| CAN / factory arrow | A CAN `GUIDE_INFO_SIMPLE` signal, or a broadcast to a cluster-debug app locked by fingerprint, signer and package | No | A Leopard 7's glass arrow is this path; it needs privileged or ADB access Vela does not have, so it is left unimplemented |
+
+The AutoNavi cluster broadcast a fourth-party app uses (`AUTONAVI_STANDARD_BROADCAST_SEND`) is not
+shipped: on the observed IVI and DiLink 5.0 head units the receiver is gated off and writes nothing,
+so it is not a working no-ADB path and would be dead code.
 
 #### The steering-wheel voice key
 

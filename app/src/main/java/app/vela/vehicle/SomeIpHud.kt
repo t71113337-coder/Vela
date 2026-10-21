@@ -69,13 +69,11 @@ class SomeIpHud(
 
     private fun refresh(s: NavSession.State) {
         val t = transport ?: return
-        if (!app.vela.ui.SomeIpHudPref.on.value) {
-            if (!clearedOnce) { t.clear(); clearedOnce = true }
-            support = VehicleSupport.AVAILABLE
-            return
-        }
         val maneuver = s.route?.maneuvers?.getOrNull(s.nav.stepIndex)
-        val guiding = s.navigating && !s.paused && !s.arrived && maneuver != null
+        val guiding = app.vela.core.vehicle.someIpHudGuiding(
+            enabled = app.vela.ui.SomeIpHudPref.on.value,
+            navigating = s.navigating, paused = s.paused, arrived = s.arrived, hasManeuver = maneuver != null,
+        )
         if (!guiding) {
             if (!clearedOnce) { t.clear(); clearedOnce = true }
             return

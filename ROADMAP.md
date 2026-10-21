@@ -273,10 +273,12 @@ off the list when it has been.
 - The BYD cluster turn arrows over the FCE vehicle HAL (SPEC 10.9). The property writes, the glyph
   table and the state transitions are unit-tested, and the service is correctly absent on both
   benches, so the write path has never run against a real HAL. Needs a car that has the service.
-- The BYD windshield HUD over the SOME/IP gateway (SPEC 10.9). The road-info frame is a byte-exact
-  unit-tested protobuf, now pinned at parity with a known-good BYD HUD sender (same field order,
-  clear frame and field-28 table, `SomeIpHudParityTest`). No frame has been fired at a real
-  windshield renderer, so the render is unverified. Known per-car results, neither a frame defect:
+- The BYD windshield HUD over the SOME/IP gateway (SPEC 10.9). The road-info frame is built by a
+  deterministic writer; for the tested vectors over the fields, the distance floor, the road byte-cap
+  and the clear frame it matches the wire bytes the documented BYD HUD contract specifies, pinned by
+  golden vectors (`SomeIpHudParityTest`); the guide-or-clear runtime decision is a tested pure
+  function (`someIpHudGuiding`). No frame has been fired at a real windshield renderer, so the render
+  is unverified. Known per-car results, neither a frame defect:
   a DiLink 5.0 cluster draws the arrow and distance but not the road text (the glass does not render
   field 10); a Leopard 7's windshield arrow is a CAN instrument signal, not a SOME/IP frame, and
   that path needs privileged or ADB access the app does not use, so it stays out of scope. Needs a
