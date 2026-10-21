@@ -100,6 +100,12 @@ Onboarding.openDonate(context)
         }
 
         Spacer(Modifier.height(8.dp))
+        // The BYD edition's own credit, beside the upstream project credit above.
+        SettingsGroup(title = stringResource(R.string.settings_credits)) {
+            Hint(stringResource(R.string.settings_credits_line))
+        }
+
+        Spacer(Modifier.height(8.dp))
         // Where the map comes from (issue #302): the ODbL credit belongs in About as well as on
         // the map, and people asked where the streets come from when they differ from Google.
         SettingsGroup(title = stringResource(R.string.settings_map_data)) {

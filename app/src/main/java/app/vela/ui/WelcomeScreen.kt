@@ -147,7 +147,7 @@ private fun WelcomeIntro(onNext: () -> Unit) {
             Spacer(Modifier.height(24.dp))
             VelaMark(84.dp)
             Spacer(Modifier.height(16.dp))
-            Text("Vela Maps", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+            Text("Vela BYD", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             Text(
                 stringResource(R.string.welcome_tagline),

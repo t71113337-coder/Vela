@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name" translatable="false">Vela Maps</string>
+    <string name="app_name" translatable="false">Vela BYD</string>
     <string name="app_name_generic" translatable="false">Maps</string>
 
     <!-- shared search-category chip labels (map + along-route); the search QUERY stays English in code -->
@@ -32,7 +32,7 @@
     <string name="settings_appearance_hint">Applies to Vela only.</string>
     <string name="settings_app_name_title">App name</string>
     <string name="settings_app_name_generic">Call it just “Maps”</string>
-    <string name="settings_app_name_generic_hint">Shows the launcher icon as plain Maps instead of Vela Maps, for a stock look. You may need to re-add a home screen shortcut after switching.</string>
+    <string name="settings_app_name_generic_hint">Shows the launcher icon as plain Maps instead of Vela BYD, for a stock look. You may need to re-add a home screen shortcut after switching.</string>
     <string name="settings_dynamic_color">Material You colors</string>
     <string name="settings_dynamic_color_hint">Tints buttons and accents from your wallpaper. The map stays neutral.</string>
     <string name="settings_map_style">Map style</string>
@@ -386,6 +386,8 @@
     <string name="settings_windshield_hud">Windshield head-up display</string>
     <string name="settings_windshield_hud_hint">Send the turn arrow, distance, road and arrival time to the car\'s windshield display while you drive, on a car that has one.</string>
     <string name="settings_windshield_hud_absent">This head unit does not offer the windshield display service.</string>
+    <string name="settings_credits">Credits</string>
+    <string name="settings_credits_line" translatable="false">Vela BYD, the BYD edition of Vela, by Sheikh Talal Zaki, Abdulla Al Hosani and Khaled Wasel. Built on Vela by PimpinPumpkin (GPLv3).</string>
     <string name="settings_wheel_voice">Steering wheel voice button</string>
     <string name="settings_wheel_voice_hint">Press the voice button on the wheel during a drive to hear the current direction again. Needs Vela\'s key access, which you turn on in Android Settings.</string>
     <string name="settings_wheel_voice_enabled">On: Vela reads the wheel\'s voice button during a drive.</string>
