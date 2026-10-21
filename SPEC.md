@@ -5828,8 +5828,11 @@ what each piece has been seen to do on a bench.
 (`:core`). A BYD head unit exposes its instrument cluster's projection area as public presentation
 displays owned by the container service (`com.byd.containerservice` on DiLink 5.0,
 `com.xdja.containerservice` on 5.1), each 1920 by 720, `FLAG_PRESENTATION`, touch NONE. Vela draws
-on one with the public `Presentation` API: no ADB, no `SYSTEM_ALERT_WINDOW`, no signature. Benches
-.165 (5.0) and .39 (5.1) list these displays; a render on a panel is not vehicle-checked.
+on one with the public `Presentation` API: no ADB, no `SYSTEM_ALERT_WINDOW`, no signature. Verified
+on a Leopard 8 (DiLink 5.1) on 2026-10-21: the window manager admits the `TYPE_PRESENTATION` window
+and the map renders on the cluster panel. The cluster input surfaces are matched by name, so the
+display ids differ per car (3/4/5 on a car with a passenger display, 2/3/4 on a bench without one)
+with no code change.
 
 The display names offered, in order: `shared_fission_bg_XDJAScreenProjection_1` (the idle right
 card), then `_0` (often under the stock map), then DiLink 4.0's `fission_bg_xdjaVirtualSurface`.

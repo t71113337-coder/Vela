@@ -403,10 +403,11 @@ why something is unavailable. The debug export carries the same states and no ve
   better.
 - Vela sends the cluster the current step and the destination. What a car's cluster or head-up
   display does with them is up to the car.
-- The BYD cluster map, cluster turn arrows, windshield HUD and steering-wheel voice button have
-  been built and run on a bench, never on a car. The cluster displays are listed and the services
-  probe correctly on both DiLink benches, but no render on a cluster or windshield panel and no
-  wheel press has been seen.
+- The cluster map is verified on a car: on a Leopard 8 (DiLink 5.1), 2026-10-21, the Presentation
+  is admitted and the map renders on the cluster panel. The cluster turn arrows, the windshield HUD
+  and the steering-wheel voice button are built and bench-run but not yet seen on a car: the
+  services probe correctly on both DiLink benches, but no windshield render and no wheel press has
+  been seen, and the cluster-arrow service is absent on the benches and that car.
 - There is no ADB cluster fallback: a car with no public cluster display keeps the map on the phone.
 - Android Auto's guidance stream is 16 kHz mono, so every navigation voice sounds duller in the
   car than on the phone, Google's included. A head unit set to play prompts over the phone-call

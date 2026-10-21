@@ -11,6 +11,13 @@ says so.
 
 ### October 2026
 
+- The BYD instrument-cluster map (SPEC 10.9): a `Presentation` on the cluster's public display
+  showing the same `CarMapRenderer` map as Android Auto, reading the one navigation session, with no
+  ADB and no permission. Verified on a Leopard 8 (DiLink 5.1) on 2026-10-21: the window manager
+  admits the `TYPE_PRESENTATION` window and the map renders on the cluster panel. The display is
+  matched by name, so a car with a passenger screen (cluster ids 3/4/5) works unchanged from a bench
+  without one (2/3/4). The cluster turn arrows, the windshield HUD and the steering-wheel key are
+  still on ROADMAP as built but not yet seen on a car.
 - Driving mode on the phone (#727): the map alone in the drive's layout with no route, with the
   speed box, the voice button, a locate button and the search bar, from the layers menu or as the
   view Vela starts in. Built. The speed and plate camera alerts, which a drive
