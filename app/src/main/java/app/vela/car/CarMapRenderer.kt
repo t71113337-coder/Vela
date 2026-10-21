@@ -1162,6 +1162,7 @@ class CarMapRenderer(
             }
         }
         app.vela.car.CarBridge.speedCameras.value.forEach { dot(it, Color.parseColor("#FB8C00")) }
+        app.vela.car.CarBridge.wazePolice.value.forEach { dot(it, Color.parseColor("#1976D2")) }
         if (app.vela.ui.Flock.on.value) {
             val route = navSession.state.value.route
             val key = System.identityHashCode(route)
