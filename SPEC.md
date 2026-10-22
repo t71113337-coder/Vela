@@ -5922,9 +5922,14 @@ glyphs.
 The runtime decision (`someIpHudGuiding`, `:core`) is a pure function and is unit-tested: it guides
 only while the feature is on and the drive is navigating, not paused, not arrived, with a maneuver;
 a stop, an arrival, a pause or a reroute with no maneuver yet falls through to one clear frame, so
-the glass never holds a stale arrow. Not yet proven on a car: a real glass has not rendered a Vela
-frame, and the field-7/8 bytes-versus-repeated-int reading is the renderer's per-car parse, not the
-sender's concern. The keepalive is 1 s, inside the roughly 2 s the glass holds a frame; the
+the glass never holds a stale arrow. On a DiLink 5.1 bench the transport was exercised against the
+real gateway: it bound with its own package as the intent type (a separate binding from the head
+unit's own), register, start and fire raised no error, and force-stopping the app drove the gateway's
+own `onUnbind` cleanly, with the gateway and the system SOME/IP services all surviving. That is the
+unbind a null type crashes, confirmed safe on a real gateway. Not yet proven: a real glass has not
+rendered a Vela frame (a bench has no windshield HUD), and the field-7/8 bytes-versus-repeated-int
+reading is the renderer's per-car parse, not the sender's concern. The keepalive is 1 s, inside the
+roughly 2 s the glass holds a frame; the
 reference re-sends at 300 ms, and the slower cadence is the proven choice on the other BYD apps on
 this path.
 
@@ -5947,7 +5952,7 @@ can reach it. This is why Vela ships two of the four and marks the rest unsuppor
 | --- | --- | --- | --- |
 | Cluster map (Presentation) | Public `Presentation` on a container-owned cluster display, matched by name | Yes | Vehicle-verified on a Leopard 8; the WMS admits the window and the map renders |
 | FCE cluster HUD | `setProperty` txn 5 on `ICarProperty`, caller not checked | Yes, where the service exists | Service absent on benches .165 and .39; property meanings seen on one car; builder and write order unit-tested; write path not run on a car |
-| SOME/IP windshield HUD | Fire a frame on the exported, permission-free `com.ts.car.someip.service` gateway | Yes, where the gateway exists | Byte-exact frame unit-tested; fired on a bench with the gateway; no real glass render seen |
+| SOME/IP windshield HUD | Fire a frame on the exported, permission-free `com.ts.car.someip.service` gateway | Yes, where the gateway exists | Byte-exact frame unit-tested; on a DiLink 5.1 bench the typed bind, start, fire and a clean unbind were confirmed against the real gateway, which survived; no glass render seen (bench has no HUD glass) |
 | CAN / factory arrow | A CAN `GUIDE_INFO_SIMPLE` signal, or a broadcast to a cluster-debug app locked by fingerprint, signer and package | No | A Leopard 7's glass arrow is this path; it needs privileged or ADB access Vela does not have, so it is left unimplemented |
 
 The AutoNavi cluster broadcast a fourth-party app uses (`AUTONAVI_STANDARD_BROADCAST_SEND`) is not
