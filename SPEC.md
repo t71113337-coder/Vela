@@ -5935,8 +5935,9 @@ this path.
 
 Two field results seen across cars are not frame defects. A Leopard 7 was dark on the glass with a
 SOME/IP sender; its windshield arrow is a CAN instrument signal (GUIDE_INFO_SIMPLE), not a SOME/IP
-frame, and that path needs privileged or ADB access the app does not have, so it stays unsupported
-and is not faked (see the reachability table). A DiLink 5.0 cluster drew the arrow and distance but
+frame. The shell and daemon writes of that register need privileged or ADB access the app does not
+have; the one delivery that needs neither, the factory ClusterDebug receiver, is not shipped (see the
+reachability table). The Leopard 7 arrow stays unsupported and is not faked. A DiLink 5.0 cluster drew the arrow and distance but
 not the road text: that glass does not render field 10 (another SOME/IP sender gets the same result
 there), so the frame, which carries the road in field 10 like the reference, is correct and the
 limit is car-side. The ETA in field 26 is sent by the reference too; it is pinned by a test and not
@@ -5946,14 +5947,15 @@ driving side, which Vela's maneuver model carries no field to express.
 #### No-ADB reachability of each cluster and HUD transport
 
 What each BYD navigation output needs, and whether Vela (no ADB, no root, no platform signature)
-can reach it. This is why Vela ships two of the four and marks the rest unsupported.
+can reach it. Vela ships the first three and leaves the last two out.
 
 | Transport | Contract | Reachable without ADB | Evidence |
 | --- | --- | --- | --- |
 | Cluster map (Presentation) | Public `Presentation` on a container-owned cluster display, matched by name | Yes | Vehicle-verified on a Leopard 8; the WMS admits the window and the map renders |
 | FCE cluster HUD | `setProperty` txn 5 on `ICarProperty`, caller not checked | Yes, where the service exists | Service absent on benches .165 and .39; property meanings seen on one car; builder and write order unit-tested; write path not run on a car |
 | SOME/IP windshield HUD | Fire a frame on the exported, permission-free `com.ts.car.someip.service` gateway | Yes, where the gateway exists | Byte-exact frame unit-tested; on a DiLink 5.1 bench the typed bind, start, fire and a clean unbind were confirmed against the real gateway, which survived; no glass render seen (bench has no HUD glass) |
-| CAN / factory arrow | A CAN `GUIDE_INFO_SIMPLE` signal, or a broadcast to a cluster-debug app locked by fingerprint, signer and package | No | A Leopard 7's glass arrow is this path; it needs privileged or ADB access Vela does not have, so it is left unimplemented |
+| CAN / FID instrument writes | `autoservice` transaction 6 from the shell uid, or the typed instrument SDK from a shell-spawned daemon | No | A Leopard 7's arrow is drawn by `GUIDE_INFO_SIMPLE`, confirmed with a shell write; Vela has no shell uid, no daemon and no signature permission, so it does not write these |
+| ClusterDebug feature records | Broadcast `byd.hud.NAVIGATION` to the system receiver `com.byd.clusterdebug/.BroadcastReceiverCAN` | Yes, where the receiver exists (exported, no permission) | It posts the same instrument registers that otherwise need the signature permission `BYDAUTO_INSTRUMENT_SET`, so it is a factory debug channel, not a public API. A fingerprint, signer and version check seen in another app is that app's own allowlist, not a lock on the receiver. Delivery is confirmed on one car, render is not (that car stayed dark). Not shipped in Vela |
 
 The AutoNavi cluster broadcast a fourth-party app uses (`AUTONAVI_STANDARD_BROADCAST_SEND`) is not
 shipped: on the observed IVI and DiLink 5.0 head units the receiver is gated off and writes nothing,

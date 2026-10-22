@@ -282,8 +282,10 @@ off the list when it has been.
   reached a windshield renderer, so the render is still unverified. Known per-car results, neither a
   frame defect:
   a DiLink 5.0 cluster draws the arrow and distance but not the road text (the glass does not render
-  field 10); a Leopard 7's windshield arrow is a CAN instrument signal, not a SOME/IP frame, and
-  that path needs privileged or ADB access the app does not use, so it stays out of scope. Needs a
+  field 10); a Leopard 7's windshield arrow is a CAN instrument signal, not a SOME/IP frame. Its shell
+  and daemon writes need privileged or ADB access the app does not use; the factory ClusterDebug
+  receiver delivers the same register without ADB but is a debug channel and is not shipped, so the
+  Leopard 7 arrow stays out of scope. Needs a
   car whose glass takes the SOME/IP frame to confirm the render.
 - The BYD steering-wheel voice button repeating the current direction (SPEC 10.9). The key router
   is unit-tested; no wheel press has reached the filter. Needs a car, and the accessibility
