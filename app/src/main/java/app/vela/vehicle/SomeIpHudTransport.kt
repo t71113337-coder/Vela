@@ -38,6 +38,7 @@ class SomeIpHudTransport(private val appContext: Context) {
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "vela-someip-hud").apply { isDaemon = true } }
     private val ticker = Executors.newSingleThreadScheduledExecutor { Thread(it, "vela-someip-keepalive").apply { isDaemon = true } }
     private var keepalive: ScheduledFuture<*>? = null
+    @Volatile private var keepaliveMs = KEEPALIVE_MS
 
     private var bound = false
     private var server: IBinder? = null
@@ -76,13 +77,17 @@ class SomeIpHudTransport(private val appContext: Context) {
         }
     }
 
-    /** Send a guidance frame and keep it refreshed on the gateway's cadence. */
-    fun send(frame: ByteArray) {
+    /** Send a guidance frame and keep it refreshed on the gateway's cadence. [fast] uses the quicker
+     *  rich-mode resend; the glass blanks after about 2 s without a frame, and a richer renderer
+     *  wants a steadier stream. */
+    fun send(frame: ByteArray, fast: Boolean = false) {
+        val want = if (fast) KEEPALIVE_FAST_MS else KEEPALIVE_MS
         worker.execute {
             lastFrame = frame
             ensureBoundLocked()
             if (server != null) fireLocked(frame)
         }
+        if (want != keepaliveMs) { keepaliveMs = want; stopKeepalive() }
         startKeepalive()
     }
 
@@ -208,12 +213,13 @@ class SomeIpHudTransport(private val appContext: Context) {
 
     private fun startKeepalive() {
         if (keepalive != null) return
+        val ms = keepaliveMs
         keepalive = ticker.scheduleWithFixedDelay({
             worker.execute {
                 recoverIfStuckLocked()
                 lastFrame?.let { if (server != null) fireLocked(it) else ensureBoundLocked() }
             }
-        }, KEEPALIVE_MS, KEEPALIVE_MS, TimeUnit.MILLISECONDS)
+        }, ms, ms, TimeUnit.MILLISECONDS)
     }
 
     private fun stopKeepalive() {
@@ -240,6 +246,8 @@ class SomeIpHudTransport(private val appContext: Context) {
         private const val RC_NOT_STARTED = 11
         private const val RC_ALREADY_STARTED = 13
         private const val KEEPALIVE_MS = 1000L
+        /** Quicker rich-mode resend (SPEC 10.9): a richer renderer wants a steadier frame stream. */
+        private const val KEEPALIVE_FAST_MS = 500L
         /** Tear down a bind that never starts; matches the recovery window used by proven senders. */
         private const val STUCK_BIND_MS = 3000L
 

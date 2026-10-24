@@ -5,6 +5,9 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.util.Log
 import app.vela.core.nav.NavSession
+import app.vela.core.vehicle.RoadExtras
+import app.vela.core.vehicle.SomeIpGuideLine
+import app.vela.core.vehicle.SomeIpHudArrows
 import app.vela.core.vehicle.SomeIpHudFrame
 import app.vela.core.vehicle.VehicleSupport
 import kotlinx.coroutines.CoroutineScope
@@ -89,17 +92,41 @@ class SomeIpHud(
         }
         val t = ensureTransport() ?: return
         clearedOnce = false
-        val frame = runCatching {
-            SomeIpHudFrame.guidance(
-                f28 = SomeIpHudFrame.maneuverId(maneuver),
-                distanceMeters = s.nav.distanceToNextManeuver.toInt(),
-                road = maneuver!!.road ?: maneuver.ref ?: "",
-                etaHhMm = etaFormat.format(Date(System.currentTimeMillis() + (s.remainingDuration * 1000).toLong())),
-                png = arrowPng(maneuver),
-            )
-        }.getOrNull() ?: return
-        t.send(frame)
+        val rich = app.vela.ui.AppTune.localOn(DIAL_RICH)
+        val frame = runCatching { buildFrame(s, maneuver!!, rich) }.getOrNull() ?: return
+        t.send(frame, fast = rich)
         support = t.support
+    }
+
+    private fun buildFrame(s: NavSession.State, maneuver: app.vela.core.model.Maneuver, rich: Boolean): ByteArray {
+        val dist = s.nav.distanceToNextManeuver.toInt()
+        val road = maneuver.road ?: maneuver.ref ?: ""
+        val eta = etaFormat.format(Date(System.currentTimeMillis() + (s.remainingDuration * 1000).toLong()))
+        val png = arrowPng(maneuver)
+        if (!rich) {
+            return SomeIpHudFrame.guidance(SomeIpHudFrame.maneuverId(maneuver), dist, road, eta, png)
+        }
+        // Rich mode (dev dial): the stock-vocabulary id, real route progress and a world-anchored
+        // guide line, all from Vela's own route and distance traveled. Still car-unverified.
+        val f28 = SomeIpHudArrows.of(maneuver, SomeIpHudArrows.Table.LAUNCHERMAP)
+        val poly = s.route?.drawPolyline ?: s.route?.polyline ?: emptyList()
+        val carM = s.nav.traveledM
+        val derived = SomeIpGuideLine.extras(poly, carM, carM + s.nav.distanceToNextManeuver, carM + s.remainingDistance)
+        val extras = RoadExtras(
+            remainingMeters = s.remainingDistance.toInt().takeIf { it >= 0 },
+            remainingSeconds = s.remainingDuration.toInt().takeIf { it >= 0 },
+            remainingTimeText = remainingTimeText(s.remainingDuration),
+            carLon = derived.carLon, carLat = derived.carLat, headingDeg = derived.headingDeg,
+            progress = derived.progress, guideLineJson = derived.guideLineJson, maneuverPoint = derived.maneuverPoint,
+        )
+        return SomeIpHudFrame.guidanceRich(f28, dist, road, eta, png, extras)
+    }
+
+    // Remaining travel time for field 27, dev-only (adb dial), so plain English is acceptable here.
+    private fun remainingTimeText(seconds: Double): String? {
+        if (seconds <= 0) return null
+        val total = (seconds / 60).toInt()
+        return if (total < 60) "$total min" else "${total / 60} h ${total % 60} min"
     }
 
     /** Attach the transport the first time the gateway is present. Returns null while absent. */
@@ -125,5 +152,7 @@ class SomeIpHud(
     private companion object {
         const val TAG = "VelaSomeIp"
         const val GLYPH_PX = 128
+        /** adb-only dev dial (`setprop debug.vela.tune.hudRich 1`) for the car-unverified rich frame. */
+        const val DIAL_RICH = "hudRich"
     }
 }

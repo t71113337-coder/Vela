@@ -288,6 +288,12 @@ off the list when it has been.
   receiver delivers the same register without ADB but is a debug channel and is not shipped, so the
   Leopard 7 arrow stays out of scope. Needs a
   car whose glass takes the SOME/IP frame to confirm the render.
+- The richer SOME/IP road frame behind the `hudRich` dev dial (SPEC 10.9): real remaining route,
+  progress, route-snapped position, heading, a world-anchored guide line and the maneuver point, from
+  Vela's own route, plus the stock field-28 vocabulary and a 500 ms resend. Built to match a
+  known-good third-party sender on cars where the minimal frame leaves the glass dark. Byte-tested
+  (`SomeIpHudRichTest`), default off, car-unverified. The 0x8003 map window that sender also publishes
+  is not built yet. Needs a car with the glass to tell whether any of it lights a dark HUD.
 - The BYD steering-wheel voice button repeating the current direction (SPEC 10.9). The key router
   is unit-tested; no wheel press has reached the filter. Needs a car, and the accessibility
   service enabled, with a drive on. `adb shell input keyevent` does not exercise the filter.
