@@ -292,8 +292,11 @@ off the list when it has been.
   progress, route-snapped position, heading, a world-anchored guide line and the maneuver point, from
   Vela's own route, plus the stock field-28 vocabulary and a 500 ms resend. Built to match a
   known-good third-party sender on cars where the minimal frame leaves the glass dark. Byte-tested
-  (`SomeIpHudRichTest`), default off, car-unverified. The 0x8003 map window that sender also publishes
-  is not built yet. Needs a car with the glass to tell whether any of it lights a dark HUD.
+  (`SomeIpHudRichTest`), default off, car-unverified. In rich mode the 0x8003 map window is also sent:
+  a 300 by 180 maneuver card (`SomeIpMapCard`, not a live map), rendered off the main thread and
+  resent on the keepalive, black on clear. The only map-window render on record is a third-party
+  result on one car and the Denza N9 renderer does not read the field, so its value is unproven. Needs
+  a car with the glass to tell whether any of the rich frame lights a dark HUD.
 - The BYD steering-wheel voice button repeating the current direction (SPEC 10.9). The key router
   is unit-tested; no wheel press has reached the filter. Needs a car, and the accessibility
   service enabled, with a drive on. `adb shell input keyevent` does not exercise the filter.

@@ -41,6 +41,7 @@ class SomeIpHud(
     private var transport: SomeIpHudTransport? = null
     private var job: Job? = null
     private var clearedOnce = false
+    private var lastRich = false
     private val etaFormat = SimpleDateFormat("HH:mm", Locale.US)
 
     /** Follows navigation for the life of the process. The setting and the gateway presence are
@@ -66,7 +67,7 @@ class SomeIpHud(
      *  gateway and refreshes from the current nav state. */
     fun onSettingChanged() {
         if (!app.vela.ui.SomeIpHudPref.on.value) {
-            transport?.clear()
+            transport?.clear(lastRich)
             clearedOnce = true
         } else {
             refresh(navSession.state.value)
@@ -81,7 +82,7 @@ class SomeIpHud(
         )
         if (!guiding) {
             if (!clearedOnce) {
-                transport?.clear()
+                transport?.clear(lastRich)
                 clearedOnce = true
             }
             // Keep support current even while idle: a missing gateway stays NOT_PRESENT.
@@ -93,9 +94,26 @@ class SomeIpHud(
         val t = ensureTransport() ?: return
         clearedOnce = false
         val rich = app.vela.ui.AppTune.localOn(DIAL_RICH)
+        lastRich = rich
         val frame = runCatching { buildFrame(s, maneuver!!, rich) }.getOrNull() ?: return
-        t.send(frame, fast = rich)
+        val mapSpec = if (rich) mapCardSpec(s, maneuver!!) else null
+        t.send(frame, mapSpec, fast = rich)
         support = t.support
+    }
+
+    // The 0x8003 map-window card inputs: the maneuver, distance, road and a remaining summary. Only
+    // built in rich mode; the transport renders it off the main thread, once per content change.
+    private fun mapCardSpec(s: NavSession.State, maneuver: app.vela.core.model.Maneuver): SomeIpMapCard.Spec {
+        val remaining = listOfNotNull(
+            distanceSummary(s.remainingDistance),
+            remainingTimeText(s.remainingDuration),
+        ).joinToString(" · ").ifEmpty { null }
+        return SomeIpMapCard.Spec(maneuver.type, s.nav.distanceToNextManeuver.toInt(), maneuver.road ?: maneuver.ref ?: "", remaining)
+    }
+
+    private fun distanceSummary(meters: Double): String? {
+        if (meters <= 0) return null
+        return if (meters >= 1000) String.format(Locale.US, "%.1f km", meters / 1000.0) else "${meters.toInt()} m"
     }
 
     private fun buildFrame(s: NavSession.State, maneuver: app.vela.core.model.Maneuver, rich: Boolean): ByteArray {

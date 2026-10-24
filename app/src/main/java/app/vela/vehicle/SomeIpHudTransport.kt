@@ -44,6 +44,8 @@ class SomeIpHudTransport(private val appContext: Context) {
     private var server: IBinder? = null
     private var started = false
     private var lastFrame: ByteArray? = null
+    private var lastMapSpec: SomeIpMapCard.Spec? = null
+    private var lastMapFrame: ByteArray? = null
     private var bindingSinceElapsed: Long = 0L
 
     // Answers the gateway's callbacks like the AIDL stub would, so registration does not fault.
@@ -80,24 +82,40 @@ class SomeIpHudTransport(private val appContext: Context) {
     /** Send a guidance frame and keep it refreshed on the gateway's cadence. [fast] uses the quicker
      *  rich-mode resend; the glass blanks after about 2 s without a frame, and a richer renderer
      *  wants a steadier stream. */
-    fun send(frame: ByteArray, fast: Boolean = false) {
+    fun send(frame: ByteArray, mapSpec: SomeIpMapCard.Spec? = null, fast: Boolean = false) {
         val want = if (fast) KEEPALIVE_FAST_MS else KEEPALIVE_MS
         worker.execute {
             lastFrame = frame
+            if (mapSpec != lastMapSpec) { // render once per content change; the keepalive resends bytes
+                lastMapSpec = mapSpec
+                lastMapFrame = mapSpec?.let { runCatching { SomeIpMapCard.frame(it) }.getOrNull() }
+            }
             ensureBoundLocked()
-            if (server != null) fireLocked(frame)
+            if (server != null) { fireLocked(frame); fireMapLocked() }
         }
         if (want != keepaliveMs) { keepaliveMs = want; stopKeepalive() }
         startKeepalive()
     }
 
-    /** Fire one blank frame and stop refreshing. The binding is kept for the next drive. */
-    fun clear() {
+    /** Fire one blank frame and stop refreshing. The binding is kept for the next drive. [rich] fires
+     *  the rich clear road and a black map window, to blank a renderer that was reading both. */
+    fun clear(rich: Boolean = false) {
         stopKeepalive()
         worker.execute {
-            lastFrame = null
-            if (server != null && started) fireLocked(SomeIpHudFrame.clear())
+            lastFrame = null; lastMapSpec = null; lastMapFrame = null
+            if (server != null && started) {
+                fireLocked(if (rich) SomeIpHudFrame.clearRich() else SomeIpHudFrame.clear())
+                if (rich) runCatching { fireOnceLocked(SomeIpMapCard.frame(null), SomeIpHudFrame.TOPIC_MAP) }
+            }
         }
+    }
+
+    // Fire the cached map window on its own topic, after the road frame has started the service. A
+    // map fire does not drive recovery; the road fire governs that.
+    private fun fireMapLocked() {
+        val m = lastMapFrame ?: return
+        if (server == null || !started) return
+        runCatching { lastMapFireRc = fireOnceLocked(m, SomeIpHudFrame.TOPIC_MAP) }
     }
 
     /** Stop the service and unbind (safe because the bind is typed). */
@@ -164,11 +182,11 @@ class SomeIpHudTransport(private val appContext: Context) {
         if (!started) registerAndStartLocked()
         if (!started) return
         runCatching {
-            var rc = fireOnceLocked(frame)
+            var rc = fireOnceLocked(frame, SomeIpHudFrame.TOPIC_ROAD_INFO)
             if (rc == RC_NOT_STARTED) { // the service was lost: re-offer and try once more
                 started = false
                 registerAndStartLocked()
-                if (started) rc = fireOnceLocked(frame)
+                if (started) rc = fireOnceLocked(frame, SomeIpHudFrame.TOPIC_ROAD_INFO)
             }
             lastFireRc = rc
             if (rc == RC_OK) {
@@ -185,9 +203,9 @@ class SomeIpHudTransport(private val appContext: Context) {
         }
     }
 
-    private fun fireOnceLocked(frame: ByteArray): Int = exec(TX_FIRE, readInt = true) { d ->
+    private fun fireOnceLocked(frame: ByteArray, topic: Long): Int = exec(TX_FIRE, readInt = true) { d ->
         d.writeInt(1)                              // typed-object non-null marker
-        d.writeLong(SomeIpHudFrame.TOPIC_ROAD_INFO)
+        d.writeLong(topic)
         d.writeLong(System.currentTimeMillis())
         d.writeInt(frame.size)                     // SomeIpData reads an explicit size, then the array (len twice by design)
         d.writeByteArray(frame)
@@ -217,7 +235,7 @@ class SomeIpHudTransport(private val appContext: Context) {
         keepalive = ticker.scheduleWithFixedDelay({
             worker.execute {
                 recoverIfStuckLocked()
-                lastFrame?.let { if (server != null) fireLocked(it) else ensureBoundLocked() }
+                lastFrame?.let { if (server != null) { fireLocked(it); fireMapLocked() } else ensureBoundLocked() }
             }
         }, ms, ms, TimeUnit.MILLISECONDS)
     }
@@ -229,6 +247,7 @@ class SomeIpHudTransport(private val appContext: Context) {
 
     @Volatile var lastStartRc: Int = -1; private set
     @Volatile var lastFireRc: Int = -1; private set
+    @Volatile var lastMapFireRc: Int = -1; private set
 
     companion object {
         private const val TAG = "VelaSomeIp"

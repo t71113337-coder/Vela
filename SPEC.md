@@ -5966,7 +5966,17 @@ each field is omitted when its value is absent, and the vehicle point is the rou
 so no raw fix is plumbed. The resend drops to 500 ms in this mode. Speed and altitude (fields 21 and
 22) are not sent, because the controller has no live fix for them. Pinned byte-for-byte and by field
 by `SomeIpHudRichTest`; `SomeIpGuideLine` formats coordinates in US locale so a comma decimal cannot
-corrupt the line JSON. The 0x8003 map window the same sender publishes is not sent yet.
+corrupt the line JSON.
+
+In rich mode the glass also receives the 0x8003 map window (`TOPIC_MAP`) the same sender publishes.
+Vela has no map engine on this path, so `SomeIpMapCard` draws a 300 by 180 maneuver card (the arrow,
+distance, road and a remaining-route line) rather than a live map, Base64-encoded as outer field 1.
+It is rendered on the transport worker thread, once per content change, and the keepalive resends the
+cached bytes; a black card is sent on clear. The road frame still governs the service, so a map fire
+never drives recovery on its own. This feeds a renderer whose nav layer waits for the map window;
+whether that matters, and whether a real map rather than a card is needed, is a per-car question a
+drive settles (the only map-window render on record is a third-party result on one car, and the Denza
+N9 renderer does not read the field). Off by default with the rest of the rich frame.
 
 #### No-ADB reachability of each cluster and HUD transport
 
