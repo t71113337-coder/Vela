@@ -7,6 +7,7 @@ import android.content.ServiceConnection
 import android.os.Binder
 import android.os.IBinder
 import android.os.Parcel
+import android.os.SystemClock
 import android.util.Log
 import app.vela.core.vehicle.SomeIpHudFrame
 import app.vela.core.vehicle.VehicleSupport
@@ -25,8 +26,10 @@ import java.util.concurrent.TimeUnit
  * our own package, which the gateway requires; a typeless bind NPE-crashes the gateway process and
  * the factory AR-HUD with it on unbind), then register a callback, then start the service before
  * the first fire, then fire the frame and re-fire it on a keepalive so the glass does not blank.
- * A head unit without the gateway is the normal case; [available] is false there and nothing is
- * bound.
+ * The bind targets the gateway's exported manager class by name (the same component proven senders
+ * use); a resolve-only bind can miss that class on some firmwares. A bind that never reaches
+ * `onServiceConnected`, or a dead binder after a fire failure, is torn down and retried. A head
+ * unit without the gateway is the normal case; [available] is false there and nothing is bound.
  */
 class SomeIpHudTransport(private val appContext: Context) {
     @Volatile var support: VehicleSupport = VehicleSupport.UNKNOWN
@@ -40,6 +43,7 @@ class SomeIpHudTransport(private val appContext: Context) {
     private var server: IBinder? = null
     private var started = false
     private var lastFrame: ByteArray? = null
+    private var bindingSinceElapsed: Long = 0L
 
     // Answers the gateway's callbacks like the AIDL stub would, so registration does not fault.
     private val callback = object : Binder() {
@@ -62,8 +66,14 @@ class SomeIpHudTransport(private val appContext: Context) {
             lastFrame?.let { fireLocked(it) }
         }
         override fun onServiceDisconnected(name: ComponentName?) = worker.execute { server = null; started = false }
-        override fun onBindingDied(name: ComponentName?) = worker.execute { server = null; started = false; support = VehicleSupport.UNAVAILABLE }
-        override fun onNullBinding(name: ComponentName?) = worker.execute { support = VehicleSupport.ACCESS_DENIED }
+        override fun onBindingDied(name: ComponentName?) = worker.execute {
+            resetBindingLocked(rebind = true)
+            support = VehicleSupport.UNAVAILABLE
+        }
+        override fun onNullBinding(name: ComponentName?) = worker.execute {
+            resetBindingLocked(rebind = false)
+            support = VehicleSupport.ACCESS_DENIED
+        }
     }
 
     /** Send a guidance frame and keep it refreshed on the gateway's cadence. */
@@ -90,23 +100,47 @@ class SomeIpHudTransport(private val appContext: Context) {
         stopKeepalive()
         worker.execute {
             runCatching { if (server != null && started) exec(TX_STOP, readInt = true) { it.writeLong(SomeIpHudFrame.SERVICE_ID) } }
-            if (bound) runCatching { appContext.unbindService(conn) }
-            bound = false; server = null; started = false
+            resetBindingLocked(rebind = false)
             support = VehicleSupport.AVAILABLE
         }
     }
 
     private fun ensureBoundLocked() {
+        recoverIfStuckLocked()
         if (bound) return
-        val resolve = Intent(ACTION).setPackage(PKG)
-        val info = runCatching { appContext.packageManager.resolveService(resolve, 0) }.getOrNull()?.serviceInfo
-        if (info == null) { support = VehicleSupport.NOT_PRESENT; return }
+        if (!available(appContext)) { support = VehicleSupport.NOT_PRESENT; return }
+        // Hardcoded manager class: the same ComponentName proven windshield senders bind. A
+        // resolve-only Intent can miss that class when the package exports more than one service.
         val intent = Intent(ACTION)
-            .setComponent(ComponentName(info.packageName, info.name))
+            .setClassName(PKG, CLASS)
             .setType(appContext.packageName) // TYPED bind with our own package: the gateway keys the
             // client on the type and crashes on unbind if it is null, so this is mandatory and must be us
         bound = runCatching { appContext.bindService(intent, conn, Context.BIND_AUTO_CREATE) }.getOrDefault(false)
+        bindingSinceElapsed = if (bound) SystemClock.elapsedRealtime() else 0L
         support = if (bound) VehicleSupport.AVAILABLE else VehicleSupport.ACCESS_DENIED
+        if (!bound) Log.w(TAG, "SOME/IP HUD bind refused")
+    }
+
+    /** A bind that never connects, or connects but never starts, is torn down after [STUCK_BIND_MS]
+     *  so the next send can retry (SPEC 10.9). */
+    private fun recoverIfStuckLocked() {
+        if (!bound) return
+        if (server != null && started) return
+        if (bindingSinceElapsed == 0L) return
+        val waited = SystemClock.elapsedRealtime() - bindingSinceElapsed
+        if (waited < STUCK_BIND_MS) return
+        Log.w(TAG, "SOME/IP HUD bind stuck after ${waited}ms; recovering")
+        resetBindingLocked(rebind = false)
+        support = VehicleSupport.UNAVAILABLE
+    }
+
+    private fun resetBindingLocked(rebind: Boolean) {
+        if (bound) runCatching { appContext.unbindService(conn) }
+        bound = false
+        server = null
+        started = false
+        bindingSinceElapsed = 0L
+        if (rebind && lastFrame != null) ensureBoundLocked()
     }
 
     private fun registerAndStartLocked() {
@@ -132,8 +166,18 @@ class SomeIpHudTransport(private val appContext: Context) {
                 if (started) rc = fireOnceLocked(frame)
             }
             lastFireRc = rc
-            support = if (rc == RC_OK) VehicleSupport.ACTIVE else VehicleSupport.FAILED
-        }.onFailure { support = VehicleSupport.FAILED; Log.w(TAG, "fire failed: ${it.javaClass.simpleName}") }
+            if (rc == RC_OK) {
+                support = VehicleSupport.ACTIVE
+            } else {
+                support = VehicleSupport.FAILED
+                // A dead binder after a failed fire needs a fresh bind; keepalive alone will not.
+                if (server?.isBinderAlive != true) resetBindingLocked(rebind = true)
+            }
+        }.onFailure {
+            support = VehicleSupport.FAILED
+            Log.w(TAG, "fire failed: ${it.javaClass.simpleName}")
+            if (server?.isBinderAlive != true) resetBindingLocked(rebind = true)
+        }
     }
 
     private fun fireOnceLocked(frame: ByteArray): Int = exec(TX_FIRE, readInt = true) { d ->
@@ -165,7 +209,10 @@ class SomeIpHudTransport(private val appContext: Context) {
     private fun startKeepalive() {
         if (keepalive != null) return
         keepalive = ticker.scheduleWithFixedDelay({
-            worker.execute { lastFrame?.let { if (server != null) fireLocked(it) } }
+            worker.execute {
+                recoverIfStuckLocked()
+                lastFrame?.let { if (server != null) fireLocked(it) else ensureBoundLocked() }
+            }
         }, KEEPALIVE_MS, KEEPALIVE_MS, TimeUnit.MILLISECONDS)
     }
 
@@ -180,6 +227,8 @@ class SomeIpHudTransport(private val appContext: Context) {
     companion object {
         private const val TAG = "VelaSomeIp"
         private const val PKG = "com.ts.car.someip.service"
+        /** Exported manager class the proven windshield senders bind by name (SPEC 10.9). */
+        private const val CLASS = "com.ts.car.someip.service.manager.SomeIpServerService"
         private const val ACTION = "com.ts.car.someip.SomeIpServerService"
         private const val SERVER_TOKEN = "ts.car.someip.sdk.ISomeIpServerInterface"
         private const val CALLBACK_TOKEN = "ts.car.someip.sdk.ISomeIpCallback"
@@ -191,9 +240,13 @@ class SomeIpHudTransport(private val appContext: Context) {
         private const val RC_NOT_STARTED = 11
         private const val RC_ALREADY_STARTED = 13
         private const val KEEPALIVE_MS = 1000L
+        /** Tear down a bind that never starts; matches the recovery window used by proven senders. */
+        private const val STUCK_BIND_MS = 3000L
 
-        /** True when this head unit has the gateway. A resolve, no bind. */
+        /** True when this head unit has the gateway manager. A resolve of the bind Intent, no bind. */
         fun available(context: Context): Boolean =
-            runCatching { context.packageManager.resolveService(Intent(ACTION).setPackage(PKG), 0) }.getOrNull() != null
+            runCatching {
+                context.packageManager.resolveService(Intent(ACTION).setClassName(PKG, CLASS), 0)
+            }.getOrNull() != null
     }
 }

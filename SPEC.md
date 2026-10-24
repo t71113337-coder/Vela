@@ -5878,7 +5878,8 @@ else enter 53, destination 3, none 0. The distance is rounded to 10 m under 1 km
 because the cluster formats kilometers itself. The service is absent on benches .165 and .39, so
 Vela's write path has not run against a real HAL. The property meanings are from one vehicle's
 observed behavior, so the feature is opt-in; what is confirmed on that one car is the property
-meanings, not a HUD Vela drove on the cluster.
+meanings, not a HUD Vela drove on the cluster. The controller probes the HAL on each navigation
+update, so a service that appears after launch still attaches.
 
 The SOME/IP windshield HUD: `SomeIpHudFrame` and `SomeIpHudArrows` (`:core`), `SomeIpHudTransport`
 and `SomeIpHud` (`:app`). A BYD head unit's windshield glass reads a road-info frame published over
@@ -5901,13 +5902,21 @@ another.
 
 The transport does a TYPED bind: the intent type is Vela's own package, which the gateway requires.
 A typeless bind NPE-crashes the gateway process, and the factory AR-HUD it hosts, on unbind. The
-session is a typed bind, then register a callback (a minimal Binder stub that
-answers the gateway's callbacks), then start the service (`0x000B010A00010000`, accepted on return
-code 0 or 13) before the first fire, then fire the frame on topic `0x0004010A00018001` (accepted on
-0; re-offer and retry once on 11), re-fired on a 1 second keepalive so the glass does not blank, one
-blank frame to clear, and stop on teardown. Every transaction runs on one background thread, because
-a wedged gateway can block a transact and must never reach the main thread. Off unless the head unit
-has the gateway and the user turned it on.
+Intent targets the exported manager class by name
+(`com.ts.car.someip.service.manager.SomeIpServerService` under package `com.ts.car.someip.service`,
+action `com.ts.car.someip.SomeIpServerService`), which is the component proven windshield senders
+bind; a resolve of the action alone can miss that class when the package exports more than one
+service. `available` resolves that same Intent. The session is a typed bind, then register a
+callback (a minimal Binder stub that answers the gateway's callbacks), then start the service
+(`0x000B010A00010000`, accepted on return code 0 or 13) before the first fire, then fire the frame
+on topic `0x0004010A00018001` (accepted on 0; re-offer and retry once on 11), re-fired on a 1 second
+keepalive so the glass does not blank, one blank frame to clear, and stop on teardown. A bind that
+never reaches a started service within 3 s is unbound and retried on the next send or keepalive
+tick; a fire that leaves a dead binder resets the binding the same way. The controller probes the
+gateway on each navigation update and when the setting turns on, so a service that appears after
+launch still attaches. Every transaction runs on one background thread, because a wedged gateway
+can block a transact and must never reach the main thread. Off unless the head unit has the gateway
+and the user turned it on.
 
 `SomeIpHudFrame` is a deterministic writer. `SomeIpHudParityTest` hand-encodes the wire bytes the
 documented HUD contract specifies, independently, and asserts the whole frame equals them for a
@@ -5953,7 +5962,7 @@ can reach it. Vela ships the first three and leaves the last two out.
 | --- | --- | --- | --- |
 | Cluster map (Presentation) | Public `Presentation` on a container-owned cluster display, matched by name | Yes | Vehicle-verified on a Leopard 8; the WMS admits the window and the map renders |
 | FCE cluster HUD | `setProperty` txn 5 on `ICarProperty`, caller not checked | Yes, where the service exists | Service absent on benches .165 and .39; property meanings seen on one car; builder and write order unit-tested; write path not run on a car |
-| SOME/IP windshield HUD | Fire a frame on the exported, permission-free `com.ts.car.someip.service` gateway | Yes, where the gateway exists | Byte-exact frame unit-tested; on a DiLink 5.1 bench the typed bind, start, fire and a clean unbind were confirmed against the real gateway, which survived; no glass render seen (bench has no HUD glass) |
+| SOME/IP windshield HUD | Fire a frame on the exported, permission-free `com.ts.car.someip.service` gateway (manager class bind) | Yes, where the gateway exists | Byte-exact frame unit-tested; on a DiLink 5.1 bench the typed bind, start, fire and a clean unbind were confirmed against the real gateway, which survived; late attach and stuck-bind recovery unit-path covered in code; no glass render seen (bench has no HUD glass) |
 | CAN / FID instrument writes | `autoservice` transaction 6 from the shell uid, or the typed instrument SDK from a shell-spawned daemon | No | A Leopard 7's arrow is drawn by `GUIDE_INFO_SIMPLE`, confirmed with a shell write; Vela has no shell uid, no daemon and no signature permission, so it does not write these |
 | ClusterDebug feature records | Broadcast `byd.hud.NAVIGATION` to the system receiver `com.byd.clusterdebug/.BroadcastReceiverCAN` | Yes, where the receiver exists (exported, no permission) | It posts the same instrument registers that otherwise need the signature permission `BYDAUTO_INSTRUMENT_SET`, so it is a factory debug channel, not a public API. A fingerprint, signer and version check seen in another app is that app's own allowlist, not a lock on the receiver. Delivery is confirmed on one car, render is not (that car stayed dark). Not shipped in Vela |
 

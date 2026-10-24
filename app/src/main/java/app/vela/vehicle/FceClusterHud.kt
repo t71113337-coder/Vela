@@ -37,15 +37,12 @@ class FceClusterHud(
     private var job: Job? = null
     private var guidanceLogged = false
 
-    /** Starts following navigation when the head unit has the FCE service. The setting is read live
-     *  on each update, so turning it on or off mid-drive takes effect without a restart. A head unit
-     *  without the service collects nothing. */
+    /** Starts following navigation for the life of the process. The setting and the FCE service
+     *  presence are read live on each update, so a late-appearing HAL or turning the feature on
+     *  mid-drive takes effect without a restart. A head unit without the service writes nothing. */
     fun start(scope: CoroutineScope) {
         if (job != null) return
-        if (!FceCarPropertyTransport.available()) { support = VehicleSupport.NOT_PRESENT; return }
-        output = FceClusterOutput(writerFactory())
-        support = VehicleSupport.AVAILABLE
-        Log.i(TAG, "FCE cluster transport ready")
+        if (!FceCarPropertyTransport.available()) support = VehicleSupport.NOT_PRESENT
         job = navSession.state.onEach { s -> worker.execute { refresh(s) } }.launchIn(scope)
     }
 
@@ -60,7 +57,7 @@ class FceClusterHud(
     }
 
     private fun refresh(s: NavSession.State) {
-        val out = output ?: return
+        val out = ensureOutput() ?: return
         try {
             val plan = clusterNavOutput(
                 enabled = app.vela.ui.FceClusterHudPref.on.value,
@@ -89,6 +86,19 @@ class FceClusterHud(
             support = VehicleSupport.FAILED
             Log.w(TAG, "FCE cluster write failed", t)
         }
+    }
+
+    /** Attach the FCE writer the first time the HAL is present. Returns null while absent. */
+    private fun ensureOutput(): FceClusterOutput? {
+        output?.let { return it }
+        if (!FceCarPropertyTransport.available()) {
+            support = VehicleSupport.NOT_PRESENT
+            return null
+        }
+        output = FceClusterOutput(writerFactory())
+        support = VehicleSupport.AVAILABLE
+        Log.i(TAG, "FCE cluster transport ready")
+        return output
     }
 
     private companion object { const val TAG = "VelaFce" }

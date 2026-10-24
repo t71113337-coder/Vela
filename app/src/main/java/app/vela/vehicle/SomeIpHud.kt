@@ -25,7 +25,8 @@ import java.util.Locale
  * The arrow is Vela's own maneuver glyph rendered to a transparent PNG (the head unit draws it from
  * field 8); the maneuver id in field 28 is the shared table. Reads navigation on the caller's
  * scope and hands frames to [SomeIpHudTransport], which serializes the Binder work off the main
- * thread.
+ * thread. The gateway is probed on each update, so a head unit that gains the service after launch
+ * (or after the user turns the setting on) still attaches without a process restart.
  */
 class SomeIpHud(
     private val appContext: Context,
@@ -39,15 +40,14 @@ class SomeIpHud(
     private var clearedOnce = false
     private val etaFormat = SimpleDateFormat("HH:mm", Locale.US)
 
-    /** Follows navigation once the head unit has the gateway. The setting is read live on each
-     *  update, so turning it on or off mid-drive takes effect without a restart. */
+    /** Follows navigation for the life of the process. The setting and the gateway presence are
+     *  read live on each update, so turning the feature on or a late-appearing gateway takes effect
+     *  without a restart. */
     fun start(scope: CoroutineScope) {
         if (job != null) return
-        if (!SomeIpHudTransport.available(appContext)) { support = VehicleSupport.NOT_PRESENT; return }
-        transport = SomeIpHudTransport(appContext)
-        support = VehicleSupport.AVAILABLE
-        Log.i(TAG, "SOME/IP HUD transport ready")
         job = navSession.state.onEach { refresh(it) }.launchIn(scope)
+        // Probe once so Diagnostics does not stay UNKNOWN until the first nav tick.
+        if (!SomeIpHudTransport.available(appContext)) support = VehicleSupport.NOT_PRESENT
     }
 
     fun stop() {
@@ -59,25 +59,35 @@ class SomeIpHud(
 
     /** The settings screen calls this when the windshield-HUD toggle changes. Turning it off blanks
      *  the glass at once (the keepalive would otherwise keep re-firing the last frame until the next
-     *  navigation update, which may not come while the car is stopped). */
+     *  navigation update, which may not come while the car is stopped). Turning it on re-probes the
+     *  gateway and refreshes from the current nav state. */
     fun onSettingChanged() {
         if (!app.vela.ui.SomeIpHudPref.on.value) {
             transport?.clear()
             clearedOnce = true
+        } else {
+            refresh(navSession.state.value)
         }
     }
 
     private fun refresh(s: NavSession.State) {
-        val t = transport ?: return
         val maneuver = s.route?.maneuvers?.getOrNull(s.nav.stepIndex)
         val guiding = app.vela.core.vehicle.someIpHudGuiding(
             enabled = app.vela.ui.SomeIpHudPref.on.value,
             navigating = s.navigating, paused = s.paused, arrived = s.arrived, hasManeuver = maneuver != null,
         )
         if (!guiding) {
-            if (!clearedOnce) { t.clear(); clearedOnce = true }
+            if (!clearedOnce) {
+                transport?.clear()
+                clearedOnce = true
+            }
+            // Keep support current even while idle: a missing gateway stays NOT_PRESENT.
+            if (transport == null && !SomeIpHudTransport.available(appContext)) {
+                support = VehicleSupport.NOT_PRESENT
+            }
             return
         }
+        val t = ensureTransport() ?: return
         clearedOnce = false
         val frame = runCatching {
             SomeIpHudFrame.guidance(
@@ -90,6 +100,19 @@ class SomeIpHud(
         }.getOrNull() ?: return
         t.send(frame)
         support = t.support
+    }
+
+    /** Attach the transport the first time the gateway is present. Returns null while absent. */
+    private fun ensureTransport(): SomeIpHudTransport? {
+        transport?.let { return it }
+        if (!SomeIpHudTransport.available(appContext)) {
+            support = VehicleSupport.NOT_PRESENT
+            return null
+        }
+        transport = SomeIpHudTransport(appContext)
+        support = VehicleSupport.AVAILABLE
+        Log.i(TAG, "SOME/IP HUD transport ready")
+        return transport
     }
 
     // Vela's own maneuver glyph on a transparent background, as PNG bytes. Null (empty field 8) if
