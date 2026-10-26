@@ -26,10 +26,15 @@ import java.util.concurrent.TimeUnit
  * our own package, which the gateway requires; a typeless bind NPE-crashes the gateway process and
  * the factory AR-HUD with it on unbind), then register a callback, then start the service before
  * the first fire, then fire the frame and re-fire it on a keepalive so the glass does not blank.
- * The bind targets the gateway's exported manager class by name (the same component proven senders
- * use); a resolve-only bind can miss that class on some firmwares. A bind that never reaches
- * `onServiceConnected`, or a dead binder after a fire failure, is torn down and retried. A head
- * unit without the gateway is the normal case; [available] is false there and nothing is bound.
+ * The bind prefers the gateway's exported manager class by name (the same component proven senders
+ * use) and falls back to resolving the action within the package when that class is absent.
+ *
+ * Failures are counted. A bind that never connects, a dead binder, a null binding or a refused
+ * start each back off a growing delay before the next attempt (so a crash-looping gateway is not
+ * hammered), and after a cap the transport gives up for the rest of the drive. After a few failures
+ * in rich mode it drops the 0x8003 map window and the fast cadence and keeps only the road frame.
+ * A new drive ([clear]) resets the counters. A head unit without the gateway is the normal case;
+ * [available] is false there and nothing is bound.
  */
 class SomeIpHudTransport(private val appContext: Context) {
     @Volatile var support: VehicleSupport = VehicleSupport.UNKNOWN
@@ -37,9 +42,12 @@ class SomeIpHudTransport(private val appContext: Context) {
 
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "vela-someip-hud").apply { isDaemon = true } }
     private val ticker = Executors.newSingleThreadScheduledExecutor { Thread(it, "vela-someip-keepalive").apply { isDaemon = true } }
+    // keepalive and keepaliveMs are touched only from the caller thread (the main thread) in
+    // send/clear/stop; keepaliveMs is volatile so the worker's keepalive task reads a stable value.
     private var keepalive: ScheduledFuture<*>? = null
     @Volatile private var keepaliveMs = KEEPALIVE_MS
 
+    // Everything below is confined to the single worker thread (and the callbacks, which post to it).
     private var bound = false
     private var server: IBinder? = null
     private var started = false
@@ -47,6 +55,10 @@ class SomeIpHudTransport(private val appContext: Context) {
     private var lastMapSpec: SomeIpMapCard.Spec? = null
     private var lastMapFrame: ByteArray? = null
     private var bindingSinceElapsed: Long = 0L
+    private var deaths = 0
+    private var rebindNotBeforeElapsed = 0L
+    private var gaveUp = false
+    @Volatile private var richFallback = false
 
     // Answers the gateway's callbacks like the AIDL stub would, so registration does not fault.
     private val callback = object : Binder() {
@@ -68,41 +80,56 @@ class SomeIpHudTransport(private val appContext: Context) {
             registerAndStartLocked()
             lastFrame?.let { fireLocked(it) }
         }
-        override fun onServiceDisconnected(name: ComponentName?) = worker.execute { server = null; started = false }
+        override fun onServiceDisconnected(name: ComponentName?) = worker.execute {
+            server = null; started = false
+            bindingSinceElapsed = SystemClock.elapsedRealtime() // the stuck-recovery timer runs from the drop
+        }
         override fun onBindingDied(name: ComponentName?) = worker.execute {
-            resetBindingLocked(rebind = true)
-            support = VehicleSupport.UNAVAILABLE
+            noteFailureLocked()
+            resetBindingLocked()
+            if (!gaveUp) support = VehicleSupport.UNAVAILABLE
         }
         override fun onNullBinding(name: ComponentName?) = worker.execute {
-            resetBindingLocked(rebind = false)
-            support = VehicleSupport.ACCESS_DENIED
+            noteFailureLocked()
+            resetBindingLocked()
+            if (!gaveUp) support = VehicleSupport.ACCESS_DENIED
         }
     }
 
     /** Send a guidance frame and keep it refreshed on the gateway's cadence. [fast] uses the quicker
      *  rich-mode resend; the glass blanks after about 2 s without a frame, and a richer renderer
-     *  wants a steadier stream. */
+     *  wants a steadier stream. In rich fallback the map window and the fast cadence are dropped. */
     fun send(frame: ByteArray, mapSpec: SomeIpMapCard.Spec? = null, fast: Boolean = false) {
-        val want = if (fast) KEEPALIVE_FAST_MS else KEEPALIVE_MS
+        val want = if (fast && !richFallback) KEEPALIVE_FAST_MS else KEEPALIVE_MS
         worker.execute {
             lastFrame = frame
-            if (mapSpec != lastMapSpec) { // render once per content change; the keepalive resends bytes
+            val mapWasOn = lastMapFrame != null
+            if (!richFallback && mapSpec != lastMapSpec) { // render once per content change; keepalive resends bytes
                 lastMapSpec = mapSpec
-                lastMapFrame = mapSpec?.let { runCatching { SomeIpMapCard.frame(it) }.getOrNull() }
+                lastMapFrame = mapSpec?.let {
+                    runCatching { SomeIpMapCard.frame(it) }.getOrNull()?.also { f -> Log.d(TAG, "0x8003 map window ${f.size} bytes") }
+                }
             }
             ensureBoundLocked()
-            if (server != null) { fireLocked(frame); fireMapLocked() }
+            if (server != null) {
+                fireLocked(frame)
+                if (lastMapFrame != null) fireMapLocked()
+                else if (mapWasOn && started) runCatching { fireOnceLocked(SomeIpMapCard.frame(null), SomeIpHudFrame.TOPIC_MAP) } // blank once on rich->minimal
+            }
         }
         if (want != keepaliveMs) { keepaliveMs = want; stopKeepalive() }
         startKeepalive()
     }
 
-    /** Fire one blank frame and stop refreshing. The binding is kept for the next drive. [rich] fires
-     *  the rich clear road and a black map window, to blank a renderer that was reading both. */
+    /** Fire one blank frame and stop refreshing, and reset the failure counters for the next drive.
+     *  The binding is kept, so if it dies while cleared nothing rebinds until the next [send]; that is
+     *  fine because a cleared HUD has nothing to show. [rich] also fires a black 0x8003 map window, to
+     *  blank a renderer that was reading both. */
     fun clear(rich: Boolean = false) {
         stopKeepalive()
         worker.execute {
             lastFrame = null; lastMapSpec = null; lastMapFrame = null
+            deaths = 0; gaveUp = false; richFallback = false; rebindNotBeforeElapsed = 0L
             if (server != null && started) {
                 fireLocked(if (rich) SomeIpHudFrame.clearRich() else SomeIpHudFrame.clear())
                 if (rich) runCatching { fireOnceLocked(SomeIpMapCard.frame(null), SomeIpHudFrame.TOPIC_MAP) }
@@ -118,34 +145,45 @@ class SomeIpHudTransport(private val appContext: Context) {
         runCatching { lastMapFireRc = fireOnceLocked(m, SomeIpHudFrame.TOPIC_MAP) }
     }
 
-    /** Stop the service and unbind (safe because the bind is typed). */
+    /** Stop the service, unbind (safe because the bind is typed) and shut the worker and ticker down.
+     *  The instance is single-use after this; the controller drops its reference. */
     fun stop() {
         stopKeepalive()
         worker.execute {
             runCatching { if (server != null && started) exec(TX_STOP, readInt = true) { it.writeLong(SomeIpHudFrame.SERVICE_ID) } }
-            resetBindingLocked(rebind = false)
+            resetBindingLocked()
             support = VehicleSupport.AVAILABLE
         }
+        worker.shutdown()   // let the queued teardown run, then stop accepting work
+        ticker.shutdownNow()
     }
 
     private fun ensureBoundLocked() {
         recoverIfStuckLocked()
-        if (bound) return
+        if (bound || gaveUp) return
+        if (SystemClock.elapsedRealtime() < rebindNotBeforeElapsed) return // inside the backoff window
         if (!available(appContext)) { support = VehicleSupport.NOT_PRESENT; return }
-        // Hardcoded manager class: the same ComponentName proven windshield senders bind. A
-        // resolve-only Intent can miss that class when the package exports more than one service.
-        val intent = Intent(ACTION)
-            .setClassName(PKG, CLASS)
+        val pm = appContext.packageManager
+        // Prefer the known manager ComponentName; fall back to resolving the action in the package
+        // when a firmware exports the manager under a different class.
+        val named = Intent(ACTION).setClassName(PKG, CLASS)
+        val useNamed = runCatching { pm.resolveService(named, 0) }.getOrNull() != null
+        val intent = (if (useNamed) named else Intent(ACTION).setPackage(PKG))
             .setType(appContext.packageName) // TYPED bind with our own package: the gateway keys the
             // client on the type and crashes on unbind if it is null, so this is mandatory and must be us
         bound = runCatching { appContext.bindService(intent, conn, Context.BIND_AUTO_CREATE) }.getOrDefault(false)
         bindingSinceElapsed = if (bound) SystemClock.elapsedRealtime() else 0L
-        support = if (bound) VehicleSupport.AVAILABLE else VehicleSupport.ACCESS_DENIED
-        if (!bound) Log.w(TAG, "SOME/IP HUD bind refused")
+        if (bound) {
+            support = VehicleSupport.AVAILABLE
+        } else {
+            noteFailureLocked()
+            if (!gaveUp) support = VehicleSupport.ACCESS_DENIED
+            Log.w(TAG, "SOME/IP HUD bind refused")
+        }
     }
 
-    /** A bind that never connects, or connects but never starts, is torn down after [STUCK_BIND_MS]
-     *  so the next send can retry (SPEC 10.9). */
+    /** A bind that connects but never starts, or a connection that dropped and did not come back, is
+     *  torn down after [STUCK_BIND_MS] so the next attempt can retry (SPEC 10.9). */
     private fun recoverIfStuckLocked() {
         if (!bound) return
         if (server != null && started) return
@@ -153,17 +191,45 @@ class SomeIpHudTransport(private val appContext: Context) {
         val waited = SystemClock.elapsedRealtime() - bindingSinceElapsed
         if (waited < STUCK_BIND_MS) return
         Log.w(TAG, "SOME/IP HUD bind stuck after ${waited}ms; recovering")
-        resetBindingLocked(rebind = false)
-        support = VehicleSupport.UNAVAILABLE
+        noteFailureLocked()
+        resetBindingLocked()
+        if (!gaveUp) support = VehicleSupport.UNAVAILABLE
     }
 
-    private fun resetBindingLocked(rebind: Boolean) {
+    // Count one failure, drop to minimal after a few, and give up after the cap; between failures,
+    // hold off the next bind by a delay that grows with the count.
+    private fun noteFailureLocked() {
+        deaths++
+        if (!richFallback && deaths >= RICH_FALLBACK_DEATHS) enterRichFallbackLocked()
+        if (deaths >= DEATH_CAP) {
+            gaveUp = true
+            support = VehicleSupport.UNAVAILABLE
+            Log.w(TAG, "SOME/IP HUD gave up after $deaths failures; retries on the next drive")
+        } else {
+            val shift = (deaths - 1).coerceIn(0, 5)
+            rebindNotBeforeElapsed = SystemClock.elapsedRealtime() + minOf(BACKOFF_BASE_MS shl shift, BACKOFF_MAX_MS)
+        }
+    }
+
+    private fun noteSuccessLocked() {
+        deaths = 0; gaveUp = false; rebindNotBeforeElapsed = 0L
+    }
+
+    // Too many failures to keep paying the rich cost: drop the map window and the fast cadence, keep
+    // the road frame. The server is usually gone at this point, so the blank is left to the next send.
+    private fun enterRichFallbackLocked() {
+        richFallback = true
+        lastMapSpec = null; lastMapFrame = null
+        keepaliveMs = KEEPALIVE_MS
+        Log.w(TAG, "SOME/IP HUD falling back to minimal after $deaths failures")
+    }
+
+    private fun resetBindingLocked() {
         if (bound) runCatching { appContext.unbindService(conn) }
         bound = false
         server = null
         started = false
         bindingSinceElapsed = 0L
-        if (rebind && lastFrame != null) ensureBoundLocked()
     }
 
     private fun registerAndStartLocked() {
@@ -173,8 +239,21 @@ class SomeIpHudTransport(private val appContext: Context) {
             val rc = exec(TX_START, readInt = true) { it.writeLong(SomeIpHudFrame.SERVICE_ID) }
             lastStartRc = rc
             started = rc == RC_OK || rc == RC_ALREADY_STARTED
-            support = if (started) VehicleSupport.ACTIVE else VehicleSupport.FAILED
-        }.onFailure { support = VehicleSupport.FAILED; Log.w(TAG, "register/start failed: ${it.javaClass.simpleName}") }
+            if (started) {
+                bindingSinceElapsed = 0L // running: the stuck-recovery timer is off
+                support = VehicleSupport.ACTIVE
+            } else {
+                // Refused start: back off and tear down rather than hammering start on every keepalive.
+                support = VehicleSupport.FAILED
+                noteFailureLocked()
+                resetBindingLocked()
+            }
+        }.onFailure {
+            support = VehicleSupport.FAILED
+            Log.w(TAG, "register/start failed: ${it.javaClass.simpleName}")
+            noteFailureLocked()
+            resetBindingLocked()
+        }
     }
 
     private fun fireLocked(frame: ByteArray) {
@@ -190,16 +269,17 @@ class SomeIpHudTransport(private val appContext: Context) {
             }
             lastFireRc = rc
             if (rc == RC_OK) {
+                noteSuccessLocked()
                 support = VehicleSupport.ACTIVE
             } else {
                 support = VehicleSupport.FAILED
                 // A dead binder after a failed fire needs a fresh bind; keepalive alone will not.
-                if (server?.isBinderAlive != true) resetBindingLocked(rebind = true)
+                if (server?.isBinderAlive != true) { noteFailureLocked(); resetBindingLocked() }
             }
         }.onFailure {
             support = VehicleSupport.FAILED
             Log.w(TAG, "fire failed: ${it.javaClass.simpleName}")
-            if (server?.isBinderAlive != true) resetBindingLocked(rebind = true)
+            if (server?.isBinderAlive != true) { noteFailureLocked(); resetBindingLocked() }
         }
     }
 
@@ -269,11 +349,20 @@ class SomeIpHudTransport(private val appContext: Context) {
         private const val KEEPALIVE_FAST_MS = 500L
         /** Tear down a bind that never starts; matches the recovery window used by proven senders. */
         private const val STUCK_BIND_MS = 3000L
+        /** Backoff before the next bind attempt, doubling per consecutive failure up to the cap. */
+        private const val BACKOFF_BASE_MS = 500L
+        private const val BACKOFF_MAX_MS = 30_000L
+        /** Give up for the rest of the drive after this many consecutive failures. */
+        private const val DEATH_CAP = 6
+        /** Drop the rich map window and fast cadence after this many, keeping the road frame. */
+        private const val RICH_FALLBACK_DEATHS = 3
 
-        /** True when this head unit has the gateway manager. A resolve of the bind Intent, no bind. */
-        fun available(context: Context): Boolean =
-            runCatching {
-                context.packageManager.resolveService(Intent(ACTION).setClassName(PKG, CLASS), 0)
-            }.getOrNull() != null
+        /** True when this head unit has the gateway, by the manager class or the action in the package.
+         *  A resolve only, no bind. */
+        fun available(context: Context): Boolean = runCatching {
+            val pm = context.packageManager
+            pm.resolveService(Intent(ACTION).setClassName(PKG, CLASS), 0) != null ||
+                pm.resolveService(Intent(ACTION).setPackage(PKG), 0) != null
+        }.getOrDefault(false)
     }
 }

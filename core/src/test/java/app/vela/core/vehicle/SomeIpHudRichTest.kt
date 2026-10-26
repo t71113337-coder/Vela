@@ -121,4 +121,51 @@ class SomeIpHudRichTest {
         val total = app.vela.core.nav.RouteProjection.cumulative(poly).last()
         assertNull(SomeIpGuideLine.extras(poly, total, total, total).guideLineJson)
     }
+
+    @Test fun `dial-off minimal frame is byte-for-byte the contract, with the 11 m floor`() {
+        // Distance 5 must floor to 11 (field 9), which the rich frame does not do: this pins that the
+        // minimal path is unchanged by the rich work.
+        val frame = SomeIpHudFrame.guidance(1, 5, "Main", "14:05", byteArrayOf(0x11, 0x22, 0x33))
+        val expected = byteArrayOf(
+            0x0A, 0x21,
+            0x10, 0x02,                                     // f2 = 2
+            0x30, 0x01,                                     // f6 = 1 (layout)
+            0x3A, 0x00,                                     // f7 empty
+            0x42, 0x03, 0x11, 0x22, 0x33,                   // f8 png
+            0x48, 0x0B,                                     // f9 = 11 (5 floored)
+            0x52, 0x04, 0x4D, 0x61, 0x69, 0x6E,             // f10 = "Main"
+            0x80.toByte(), 0x01, 0x02,                      // f16 = 2
+            0xD2.toByte(), 0x01, 0x05, 0x31, 0x34, 0x3A, 0x30, 0x35, // f26 = "14:05"
+            0xE0.toByte(), 0x01, 0x01,                      // f28 = 1
+        )
+        assertArrayEquals(expected, frame)
+    }
+
+    @Test fun `the car point is taken from the polyline that is passed`() {
+        val east = listOf(LatLng(0.0, 0.0), LatLng(0.0, 0.02))
+        val north = listOf(LatLng(0.0, 0.0), LatLng(0.02, 0.0))
+        val tE = app.vela.core.nav.RouteProjection.cumulative(east).last()
+        val tN = app.vela.core.nav.RouteProjection.cumulative(north).last()
+        val de = SomeIpGuideLine.extras(east, tE * 0.5, tE, tE)
+        val dn = SomeIpGuideLine.extras(north, tN * 0.5, tN, tN)
+        assertTrue(de.carLon!! > 0.0 && de.carLat!! == 0.0)    // moved east
+        assertTrue(dn.carLat!! > 0.0 && dn.carLon!! == 0.0)    // moved north
+    }
+
+    @Test fun `a very dense line is sampled to at most 256 points and keeps its ends`() {
+        val poly = (0..399).map { LatLng(0.0, it * 0.001) }
+        val total = app.vela.core.nav.RouteProjection.cumulative(poly).last()
+        val d = SomeIpGuideLine.extras(poly, 0.0, total, total)
+        val n = d.guideLineJson!!.split("],[").size
+        assertTrue("sampled to $n", n in 3..256)
+        assertTrue(d.guideLineJson!!.startsWith("[[0.0,0.0,0]"))  // first vertex kept
+    }
+
+    @Test fun `a maneuver past the route end yields no maneuver point and does not throw`() {
+        val poly = listOf(LatLng(0.0, 0.0), LatLng(0.0, 0.01), LatLng(0.0, 0.02))
+        val total = app.vela.core.nav.RouteProjection.cumulative(poly).last()
+        val d = SomeIpGuideLine.extras(poly, total * 0.25, total + 5000.0, total)
+        assertNull(d.maneuverPoint)
+        assertTrue(d.carLon!! > 0.0)                             // still produced a car point
+    }
 }

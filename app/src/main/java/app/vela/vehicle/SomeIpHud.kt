@@ -44,6 +44,11 @@ class SomeIpHud(
     private var lastRich = false
     private val etaFormat = SimpleDateFormat("HH:mm", Locale.US)
 
+    // Cumulative-distance array cached per route polyline, so the guide-line geometry is not O(route)
+    // every tick. Keyed on the polyline instance: a new route is a new list.
+    private var cumPoly: List<app.vela.core.model.LatLng>? = null
+    private var cumArr: DoubleArray? = null
+
     /** Follows navigation for the life of the process. The setting and the gateway presence are
      *  read live on each update, so turning the feature on or a late-appearing gateway takes effect
      *  without a restart. */
@@ -85,9 +90,11 @@ class SomeIpHud(
                 transport?.clear(lastRich)
                 clearedOnce = true
             }
-            // Keep support current even while idle: a missing gateway stays NOT_PRESENT.
-            if (transport == null && !SomeIpHudTransport.available(appContext)) {
-                support = VehicleSupport.NOT_PRESENT
+            // Resolve support at most once while idle, and only with the feature on: the probe is a
+            // PackageManager IPC, so do not run it on the main thread every tick. A late-appearing
+            // gateway is still caught by ensureTransport when guiding starts.
+            if (transport == null && support == VehicleSupport.UNKNOWN && app.vela.ui.SomeIpHudPref.on.value) {
+                support = if (SomeIpHudTransport.available(appContext)) VehicleSupport.AVAILABLE else VehicleSupport.NOT_PRESENT
             }
             return
         }
@@ -108,7 +115,7 @@ class SomeIpHud(
             distanceSummary(s.remainingDistance),
             remainingTimeText(s.remainingDuration),
         ).joinToString(" · ").ifEmpty { null }
-        return SomeIpMapCard.Spec(maneuver.type, s.nav.distanceToNextManeuver.toInt(), maneuver.road ?: maneuver.ref ?: "", remaining)
+        return SomeIpMapCard.Spec(maneuver.type, SomeIpMapCard.distanceText(s.nav.distanceToNextManeuver.toInt()), maneuver.road ?: maneuver.ref ?: "", remaining)
     }
 
     private fun distanceSummary(meters: Double): String? {
@@ -127,9 +134,13 @@ class SomeIpHud(
         // Rich mode (dev dial): the stock-vocabulary id, real route progress and a world-anchored
         // guide line, all from Vela's own route and distance traveled. Still car-unverified.
         val f28 = SomeIpHudArrows.of(maneuver, SomeIpHudArrows.Table.LAUNCHERMAP)
-        val poly = s.route?.drawPolyline ?: s.route?.polyline ?: emptyList()
+        // The route's own polyline, which traveledM and distanceToNextManeuver are measured along
+        // (NavEngine), NOT the display-only drawPolyline, or the car point would sit off the route.
+        val poly = s.route?.polyline ?: emptyList()
         val carM = s.nav.traveledM
-        val derived = SomeIpGuideLine.extras(poly, carM, carM + s.nav.distanceToNextManeuver, carM + s.remainingDistance)
+        val derived = if (poly.size >= 2)
+            SomeIpGuideLine.extras(poly, cumFor(poly), carM, carM + s.nav.distanceToNextManeuver, carM + s.remainingDistance)
+        else SomeIpGuideLine.Derived()
         val extras = RoadExtras(
             remainingMeters = s.remainingDistance.toInt().takeIf { it >= 0 },
             remainingSeconds = s.remainingDuration.toInt().takeIf { it >= 0 },
@@ -145,6 +156,14 @@ class SomeIpHud(
         if (seconds <= 0) return null
         val total = (seconds / 60).toInt()
         return if (total < 60) "$total min" else "${total / 60} h ${total % 60} min"
+    }
+
+    // Cumulative distances for this polyline, recomputed only when the route changes.
+    private fun cumFor(poly: List<app.vela.core.model.LatLng>): DoubleArray {
+        if (poly === cumPoly) return cumArr!!
+        val a = app.vela.core.nav.RouteProjection.cumulative(poly)
+        cumPoly = poly; cumArr = a
+        return a
     }
 
     /** Attach the transport the first time the gateway is present. Returns null while absent. */

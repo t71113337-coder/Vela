@@ -23,8 +23,15 @@ object SomeIpMapCard {
     const val WIDTH = 300
     const val HEIGHT = 180
 
-    /** What the card shows. Value equality drives the render-once-per-change cache in the transport. */
-    data class Spec(val maneuver: ManeuverType?, val distanceM: Int, val road: String, val remaining: String?)
+    /** What the card shows. Value equality drives the render-once-per-change cache in the transport,
+     *  so distance is the already-quantized display string, not raw meters that tick every frame. */
+    data class Spec(val maneuver: ManeuverType?, val distanceText: String, val road: String, val remaining: String?)
+
+    /** Display distance, quantized to 10 m below a kilometer so the card does not re-render every meter. */
+    fun distanceText(m: Int): String {
+        val d = m.coerceAtLeast(0)
+        return if (d >= 1000) String.format(java.util.Locale.US, "%.1f km", d / 1000.0) else "${((d + 5) / 10) * 10} m"
+    }
 
     private const val BG = 0xFF0A0E14.toInt()
     private const val FG = 0xFFFFFFFF.toInt()
@@ -37,32 +44,32 @@ object SomeIpMapCard {
     private val blackBase64: String by lazy {
         val bmp = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
         bmp.eraseColor(Color.BLACK)
-        base64(bmp)
+        try { base64(bmp) } finally { bmp.recycle() }
     }
 
     private fun renderBase64(spec: Spec): String {
         val bmp = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
-        c.drawColor(BG)
-        // Arrow glyph on the left.
-        val glyph = runCatching { NavGlyphs.bitmap(spec.maneuver ?: ManeuverType.STRAIGHT, GLYPH, Color.TRANSPARENT) }.getOrNull()
-        if (glyph != null) {
-            val dst = Rect(PAD, (HEIGHT - GLYPH) / 2, PAD + GLYPH, (HEIGHT + GLYPH) / 2)
-            c.drawBitmap(glyph, null, dst, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+        try {
+            val c = Canvas(bmp)
+            c.drawColor(BG)
+            // Arrow glyph on the left.
+            val glyph = runCatching { NavGlyphs.bitmap(spec.maneuver ?: ManeuverType.STRAIGHT, GLYPH, Color.TRANSPARENT) }.getOrNull()
+            if (glyph != null) {
+                val dst = Rect(PAD, (HEIGHT - GLYPH) / 2, PAD + GLYPH, (HEIGHT + GLYPH) / 2)
+                c.drawBitmap(glyph, null, dst, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+                glyph.recycle()
+            }
+            val textX = (PAD + GLYPH + PAD).toFloat()
+            // Distance, big (already quantized by the caller).
+            c.drawText(spec.distanceText, textX, 72f, paint(ACCENT, 52f, bold = true))
+            // Road name, clipped to the card width.
+            if (spec.road.isNotEmpty()) c.drawText(ellipsize(spec.road, textX, 30f), textX, 116f, paint(FG, 30f))
+            // Remaining route, dim.
+            if (!spec.remaining.isNullOrEmpty()) c.drawText(spec.remaining, textX, 152f, paint(DIM, 24f))
+            return base64(bmp)
+        } finally {
+            bmp.recycle()
         }
-        val textX = (PAD + GLYPH + PAD).toFloat()
-        // Distance, big.
-        c.drawText(distanceText(spec.distanceM), textX, 72f, paint(ACCENT, 52f, bold = true))
-        // Road name, clipped to the card width.
-        if (spec.road.isNotEmpty()) c.drawText(ellipsize(spec.road, textX, 30f), textX, 116f, paint(FG, 30f))
-        // Remaining route, dim.
-        if (!spec.remaining.isNullOrEmpty()) c.drawText(spec.remaining, textX, 152f, paint(DIM, 24f))
-        return base64(bmp)
-    }
-
-    private fun distanceText(m: Int): String {
-        val d = m.coerceAtLeast(0)
-        return if (d >= 1000) String.format(java.util.Locale.US, "%.1f km", d / 1000.0) else "$d m"
     }
 
     private fun ellipsize(s: String, x: Float, textSize: Float): String {

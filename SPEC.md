@@ -5902,19 +5902,22 @@ another.
 
 The transport does a TYPED bind: the intent type is Vela's own package, which the gateway requires.
 A typeless bind NPE-crashes the gateway process, and the factory AR-HUD it hosts, on unbind. The
-Intent targets the exported manager class by name
+Intent prefers the exported manager class by name
 (`com.ts.car.someip.service.manager.SomeIpServerService` under package `com.ts.car.someip.service`,
 action `com.ts.car.someip.SomeIpServerService`), which is the component proven windshield senders
-bind; a resolve of the action alone can miss that class when the package exports more than one
-service. `available` resolves that same Intent. The session is a typed bind, then register a
+bind, and falls back to resolving the action within the package when a firmware exports the manager
+under a different class. `available` is true when either resolves. The session is a typed bind, then register a
 callback (a minimal Binder stub that answers the gateway's callbacks), then start the service
 (`0x000B010A00010000`, accepted on return code 0 or 13) before the first fire, then fire the frame
 on topic `0x0004010A00018001` (accepted on 0; re-offer and retry once on 11), re-fired on a 1 second
 keepalive so the glass does not blank, one blank frame to clear, and stop on teardown. A bind that
-never reaches a started service within 3 s is unbound and retried on the next send or keepalive
-tick; a fire that leaves a dead binder resets the binding the same way. The controller probes the
-gateway on each navigation update and when the setting turns on, so a service that appears after
-launch still attaches. Every transaction runs on one background thread, because a wedged gateway
+never reaches a started service within 3 s is unbound; a fire that leaves a dead binder, a refused
+start, a dead binding or a null binding resets it the same way. Each such failure backs off a delay
+that grows with the count before the next attempt, and after a cap the transport gives up until the
+next drive, so a crash-looping gateway is not hammered; in rich mode a few failures also drop the
+0x8003 map window and the fast cadence and keep only the road frame. The controller probes the
+gateway once while idle (off the main thread) and on each navigation update once guiding, so a
+service that appears after launch still attaches. Every transaction runs on one background thread, because a wedged gateway
 can block a transact and must never reach the main thread. Off unless the head unit has the gateway
 and the user turned it on.
 
@@ -5966,13 +5969,16 @@ each field is omitted when its value is absent, and the vehicle point is the rou
 so no raw fix is plumbed. The resend drops to 500 ms in this mode. Speed and altitude (fields 21 and
 22) are not sent, because the controller has no live fix for them. Pinned byte-for-byte and by field
 by `SomeIpHudRichTest`; `SomeIpGuideLine` formats coordinates in US locale so a comma decimal cannot
-corrupt the line JSON.
+corrupt the line JSON. The guide line and the vehicle point are built from the route's own polyline,
+the one traveled distance is measured along, with the cumulative distances cached per route; the line
+is bounded at 256 points and a straight two-point approach is densified so field 30 is still sent.
 
 In rich mode the glass also receives the 0x8003 map window (`TOPIC_MAP`) the same sender publishes.
 Vela has no map engine on this path, so `SomeIpMapCard` draws a 300 by 180 maneuver card (the arrow,
 distance, road and a remaining-route line) rather than a live map, Base64-encoded as outer field 1.
-It is rendered on the transport worker thread, once per content change, and the keepalive resends the
-cached bytes; a black card is sent on clear. The road frame still governs the service, so a map fire
+It is rendered on the transport worker thread, once per content change, the distance quantized to
+display granularity so it does not re-render every meter, and the keepalive resends the cached bytes;
+a black card is sent on clear and on a drop back to the minimal frame. The road frame still governs the service, so a map fire
 never drives recovery on its own. This feeds a renderer whose nav layer waits for the map window;
 whether that matters, and whether a real map rather than a card is needed, is a per-car question a
 drive settles (the only map-window render on record is a third-party result on one car, and the Denza
@@ -5987,7 +5993,7 @@ can reach it. Vela ships the first three and leaves the last two out.
 | --- | --- | --- | --- |
 | Cluster map (Presentation) | Public `Presentation` on a container-owned cluster display, matched by name | Yes | Vehicle-verified on a Leopard 8; the WMS admits the window and the map renders |
 | FCE cluster HUD | `setProperty` txn 5 on `ICarProperty`, caller not checked | Yes, where the service exists | Service absent on benches .165 and .39; property meanings seen on one car; builder and write order unit-tested; write path not run on a car |
-| SOME/IP windshield HUD | Fire a frame on the exported, permission-free `com.ts.car.someip.service` gateway (manager class bind) | Yes, where the gateway exists | Byte-exact frame unit-tested; on a DiLink 5.1 bench the typed bind, start, fire and a clean unbind were confirmed against the real gateway, which survived; late attach and stuck-bind recovery unit-path covered in code; no glass render seen (bench has no HUD glass) |
+| SOME/IP windshield HUD | Fire a frame on the exported, permission-free `com.ts.car.someip.service` gateway (manager class bind) | Yes, where the gateway exists | Byte-exact frame unit-tested; on a DiLink 5.1 bench the typed bind, start, fire and a clean unbind were confirmed against the real gateway, which survived; late attach, stuck-bind recovery, rebind backoff, a give-up cap and a rich-to-minimal fallback are code paths, not yet run on a car; no glass render seen (bench has no HUD glass) |
 | CAN / FID instrument writes | `autoservice` transaction 6 from the shell uid, or the typed instrument SDK from a shell-spawned daemon | No | A Leopard 7's arrow is drawn by `GUIDE_INFO_SIMPLE`, confirmed with a shell write; Vela has no shell uid, no daemon and no signature permission, so it does not write these |
 | ClusterDebug feature records | Broadcast `byd.hud.NAVIGATION` to the system receiver `com.byd.clusterdebug/.BroadcastReceiverCAN` | Yes, where the receiver exists (exported, no permission) | It posts the same instrument registers that otherwise need the signature permission `BYDAUTO_INSTRUMENT_SET`, so it is a factory debug channel, not a public API. A fingerprint, signer and version check seen in another app is that app's own allowlist, not a lock on the receiver. Delivery is confirmed on one car, render is not (that car stayed dark). Not shipped in Vela |
 

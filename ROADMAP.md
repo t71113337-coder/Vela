@@ -277,8 +277,9 @@ off the list when it has been.
   deterministic writer; for the tested vectors over the fields, the distance floor, the road byte-cap
   and the clear frame it matches the wire bytes the documented BYD HUD contract specifies, pinned by
   golden vectors (`SomeIpHudParityTest`); the guide-or-clear runtime decision is a tested pure
-  function (`someIpHudGuiding`). The transport binds the gateway manager class by name, recovers a
-  stuck bind after 3 s, and attaches if the gateway appears after launch. On a DiLink 5.1 bench the
+  function (`someIpHudGuiding`). The transport binds the gateway manager class by name (or the action
+  in the package when that class is absent), recovers a stuck bind after 3 s, backs off a crash-looping
+  gateway and gives up until the next drive, and attaches if the gateway appears after launch. On a DiLink 5.1 bench the
   typed bind, start, fire and a clean unbind were confirmed against the real gateway (which survived
   the force-stop unbind), but no frame has reached a windshield renderer, so the render is still
   unverified. Known per-car results, neither a frame defect:
