@@ -52,7 +52,7 @@ what tells your F-Droid client the listing is genuine. The APKs themselves are s
 certificate fingerprint is:
 
 ```
-SHA-256  29:93:8B:48:58:06:3E:42:E6:77:FF:95:C9:01:CD:48:24:8A:7F:03:2A:3A:E8:5F:9B:9E:56:17:56:8B:0D:36
+SHA-256  C9:11:B4:DD:7D:A8:1B:F1:54:DB:61:73:28:8A:E1:A9:B3:69:3D:50:F5:41:20:FC:87:F4:A6:2A:A5:18:11:54
 ```
 
 That is the one to check an APK against (`apksigner verify --print-certs`), and
