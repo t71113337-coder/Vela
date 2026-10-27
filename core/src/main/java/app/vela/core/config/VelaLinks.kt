@@ -47,8 +47,12 @@ object VelaLinks {
     const val PAINTED_ROADS = "paintedRoads"
 
     private val DEFAULTS: Map<String, String> = mapOf(
-        REPO to "https://github.com/PimpinPumpkin/Vela",
-        API to "https://api.github.com/repos/PimpinPumpkin/Vela",
+        // This BYD edition ships its own signed builds, so the in-app updater (REPO + API, read by
+        // SelfUpdater) points at this fork's releases, not the upstream project. RELEASES, RAW and
+        // PAGES stay on the upstream project, which hosts the map data, calibration and fonts that
+        // exist nowhere else; repointing those would break the data downloads.
+        REPO to "https://github.com/t71113337-coder/Vela",
+        API to "https://api.github.com/repos/t71113337-coder/Vela",
         RELEASES to "https://github.com/PimpinPumpkin/Vela/releases/download",
         RAW to "https://raw.githubusercontent.com/PimpinPumpkin/Vela/main",
         SITE to "https://velamaps.org",

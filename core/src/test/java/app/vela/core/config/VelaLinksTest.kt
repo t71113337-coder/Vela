@@ -23,14 +23,14 @@ class VelaLinksTest {
         VelaLinks.overrides = mapOf(VelaLinks.SITE to "https://vela.example")
         assertEquals("https://pimpinpumpkin.github.io/Vela/fonts", VelaLinks.mapFonts())
         assertEquals("https://github.com/PimpinPumpkin/Vela/releases/download/voices/x.tar.bz2", VelaLinks.release("voices", "x.tar.bz2"))
-        assertEquals("https://api.github.com/repos/PimpinPumpkin/Vela/releases/latest", VelaLinks.api("/releases/latest"))
+        assertEquals("https://api.github.com/repos/t71113337-coder/Vela/releases/latest", VelaLinks.api("/releases/latest"))
     }
 
     @Test fun `a pushed base moves every file under it, and a pushed key moves that one`() {
         VelaLinks.overrides = mapOf(VelaLinks.RELEASES to "https://github.com/NewName/Vela/releases/download")
         assertEquals("https://github.com/NewName/Vela/releases/download/obf-regions/obf-manifest.json", VelaLinks.obfManifest())
         assertEquals("https://github.com/NewName/Vela/releases/download/fuel-gb/", VelaLinks.fuelGb())
-        assertEquals("https://github.com/PimpinPumpkin/Vela", VelaLinks.repo())
+        assertEquals("https://github.com/t71113337-coder/Vela", VelaLinks.repo())
         VelaLinks.overrides = mapOf(VelaLinks.RAW to "https://example.org/vela", VelaLinks.PRIVACY to "https://example.org/privacy")
         assertEquals("https://example.org/vela/calibration.json", VelaLinks.calibration())
         assertEquals("https://example.org/privacy", VelaLinks.privacy())
