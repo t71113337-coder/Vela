@@ -171,7 +171,7 @@ class BrowserHeadersTest {
     @Test fun `the community identifier is not a browser string`() {
         // Community services (FOSSGIS OSRM, Nominatim, Photon, Overpass) must get a contactable UA.
         assertTrue(VelaConfig.VELA_UA.startsWith("VelaMaps/"))
-        assertTrue(VelaConfig.VELA_UA.contains("github.com/PimpinPumpkin/Vela"))
+        assertTrue(VelaConfig.VELA_UA.contains("github.com/t71113337-coder/Vela"))
         assertTrue("must not masquerade as a browser", !VelaConfig.VELA_UA.contains("Mozilla"))
     }
 

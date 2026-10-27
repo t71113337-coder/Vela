@@ -254,10 +254,10 @@ class CalibrationStore @Inject constructor(
 
         private val ALLOWED_HOSTS = setOf("www.google.com", "google.com")
 
-        // EC P-256 public key (SPKI, base64) — the private half lives only in
-        // ~/.vela-signing/vela-calibration.key, never in the repo. Embedding the
-        // PUBLIC key is safe; it just lets the app reject bundles we didn't sign.
+        // EC P-256 public key (SPKI, base64): this fork's own key. The private half lives only in
+        // ~/.vela-signing/vela-calibration.key, never in the repo. Embedding the PUBLIC key is safe;
+        // it just lets the app reject any calibration bundle this fork did not sign.
         private const val PINNED_PUBLIC_KEY =
-            "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEuz8/zxOJFhVqKco74fkmzrLlyPra4/pTEUm7lmue/Kig0T497fcs+hjhZkaSqVZAwloNrr0+0ILi7yATmU+d3g=="
+            "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEdsTmqLckkKiASbXlRuayUvQWV/TGIgYudpkGit9gUZ4iECe/4A5ngwW9XMmkBSYvpCiaU0e56iEJ1NAx4s5/Ww=="
     }
 }

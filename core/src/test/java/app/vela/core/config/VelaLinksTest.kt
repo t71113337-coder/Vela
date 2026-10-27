@@ -14,11 +14,11 @@ class VelaLinksTest {
 
     @Test fun `defaults derive the files from their bases`() {
         assertEquals("https://github.com/PimpinPumpkin/Vela/releases/download/obf-regions/obf-manifest.json", VelaLinks.obfManifest())
-        assertEquals("https://raw.githubusercontent.com/PimpinPumpkin/Vela/main/calibration.json", VelaLinks.calibration())
+        assertEquals("https://raw.githubusercontent.com/t71113337-coder/Vela/main/calibration.json", VelaLinks.calibration())
         assertEquals(VelaLinks.calibration() + ".sig", VelaLinks.calibrationSig())
-        assertEquals("https://velamaps.org/calibration.json", VelaLinks.calibrationMirror())
+        assertEquals("https://vela.ta1a1.cc/calibration.json", VelaLinks.calibrationMirror())
         assertEquals("https://pimpinpumpkin.github.io/Vela/fonts", VelaLinks.mapFonts())
-        assertEquals("https://velamaps.org", VelaLinks.site())
+        assertEquals("https://vela.ta1a1.cc", VelaLinks.site())
         // The website and the Pages address are separate keys: moving the site leaves the fonts.
         VelaLinks.overrides = mapOf(VelaLinks.SITE to "https://vela.example")
         assertEquals("https://pimpinpumpkin.github.io/Vela/fonts", VelaLinks.mapFonts())
