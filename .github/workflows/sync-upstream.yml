@@ -1,0 +1,54 @@
+name: Sync upstream
+
+# Opens (or refreshes) a pull request that brings the upstream project's main into this fork,
+# weekly and on demand. It never merges on its own: conflicts and the MapScreen verifier limit
+# need a human and a device check. Review the PR, resolve conflicts (expect them on VelaLinks.kt
+# defaults and the README/FDROID fingerprint lines), build both debug and release and read logcat
+# for VerifyError after any change touching MapScreen, run the tests, then merge and cut a release.
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Mondays 06:00 UTC, before the Monday stable promotion
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      UPSTREAM: https://github.com/PimpinPumpkin/Vela.git
+      BASE: main
+      SYNC_BRANCH: sync/upstream
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Open or refresh the upstream-sync PR
+        run: |
+          set -euo pipefail
+          git config user.name "vela-sync[bot]"
+          git config user.email "vela-sync@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM" 2>/dev/null || git remote set-url upstream "$UPSTREAM"
+          git fetch --no-tags upstream "$BASE"
+          behind=$(git rev-list --count "origin/$BASE..refs/remotes/upstream/$BASE")
+          echo "Fork is $behind commit(s) behind upstream/$BASE."
+          if [ "$behind" -eq 0 ]; then
+            echo "Already up to date; nothing to open."
+            exit 0
+          fi
+          # Point the sync branch at upstream's tip so the PR shows exactly what is new upstream.
+          git push --force origin "refs/remotes/upstream/$BASE:refs/heads/$SYNC_BRANCH"
+          open=$(gh pr list --head "$SYNC_BRANCH" --state open --json number --jq 'length')
+          if [ "$open" -gt 0 ]; then
+            echo "A sync PR is already open; its branch now points at upstream's latest."
+            exit 0
+          fi
+          body=$(printf 'Automated weekly sync. Brings in %s commit(s) from upstream (PimpinPumpkin/Vela) main.\n\nDo NOT auto-merge. Review, resolve conflicts (expect them on VelaLinks.kt defaults and the README/FDROID fingerprint lines), build BOTH debug and release and read logcat for VerifyError after any change that touches MapScreen, run the tests, then merge and cut a fork release.' "$behind")
+          gh pr create --base "$BASE" --head "$SYNC_BRANCH" --title "Sync upstream into the fork" --body "$body"
